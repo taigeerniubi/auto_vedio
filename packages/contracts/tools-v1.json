@@ -1,0 +1,1744 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "assemble_sequence",
+      "description": "按顺序组装视频和图片，替换当前草稿并清空已有包装和配乐。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Clip": {
+            "additionalProperties": false,
+            "properties": {
+              "clip_id": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+                "title": "Clip Id",
+                "type": "string"
+              },
+              "asset_id": {
+                "title": "Asset Id",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "video",
+                  "image"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "source_in_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Source In Frame",
+                "type": "integer"
+              },
+              "source_out_frame": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Source Out Frame"
+              },
+              "still_duration_frames": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Still Duration Frames"
+              },
+              "rate_num": {
+                "default": 1,
+                "exclusiveMinimum": 0,
+                "title": "Rate Num",
+                "type": "integer"
+              },
+              "rate_den": {
+                "default": 1,
+                "exclusiveMinimum": 0,
+                "title": "Rate Den",
+                "type": "integer"
+              },
+              "reverse": {
+                "default": false,
+                "title": "Reverse",
+                "type": "boolean"
+              },
+              "original_audio_gain_db": {
+                "default": 0,
+                "maximum": 12,
+                "minimum": -60,
+                "title": "Original Audio Gain Db",
+                "type": "number"
+              },
+              "transform": {
+                "$ref": "#/$defs/Transform"
+              },
+              "motion": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Motion"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "color_preset": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "warm",
+                      "cool",
+                      "monochrome"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Color Preset"
+              },
+              "derived_from_clip_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Derived From Clip Id"
+              }
+            },
+            "required": [
+              "clip_id",
+              "asset_id",
+              "kind"
+            ],
+            "title": "Clip",
+            "type": "object"
+          },
+          "Motion": {
+            "additionalProperties": false,
+            "properties": {
+              "preset_id": {
+                "enum": [
+                  "slow_push_in",
+                  "slow_pull_out",
+                  "pan_left",
+                  "pan_right",
+                  "pan_up",
+                  "pan_down"
+                ],
+                "title": "Preset Id",
+                "type": "string"
+              },
+              "preset_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Preset Version",
+                "type": "integer"
+              },
+              "local_start_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Local Start Frame",
+                "type": "integer"
+              },
+              "local_end_frame": {
+                "exclusiveMinimum": 0,
+                "title": "Local End Frame",
+                "type": "integer"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "intensity": {
+                "default": 0.12,
+                "exclusiveMinimum": 0,
+                "maximum": 0.5,
+                "title": "Intensity",
+                "type": "number"
+              },
+              "easing": {
+                "default": "ease_in_out",
+                "enum": [
+                  "linear",
+                  "ease_in_out"
+                ],
+                "title": "Easing",
+                "type": "string"
+              }
+            },
+            "required": [
+              "preset_id",
+              "local_end_frame"
+            ],
+            "title": "Motion",
+            "type": "object"
+          },
+          "Transform": {
+            "additionalProperties": false,
+            "properties": {
+              "fit": {
+                "default": "cover",
+                "enum": [
+                  "cover",
+                  "contain"
+                ],
+                "title": "Fit",
+                "type": "string"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "scale": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 1,
+                "title": "Scale",
+                "type": "number"
+              },
+              "rotation_deg": {
+                "default": 0,
+                "maximum": 15,
+                "minimum": -15,
+                "title": "Rotation Deg",
+                "type": "number"
+              }
+            },
+            "title": "Transform",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "clips": {
+            "items": {
+              "$ref": "#/$defs/Clip"
+            },
+            "maxItems": 40,
+            "minItems": 1,
+            "title": "Clips",
+            "type": "array"
+          }
+        },
+        "required": [
+          "clips"
+        ],
+        "title": "SequenceArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "trim_clip",
+      "description": "裁切视频源帧区间，或设置图片显示帧数；依赖效果越界时拒绝修改。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "source_in_frame": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Source In Frame",
+            "type": "integer"
+          },
+          "source_out_frame": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Out Frame"
+          },
+          "still_duration_frames": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Still Duration Frames"
+          }
+        },
+        "required": [
+          "clip_id"
+        ],
+        "title": "TrimArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "split_clip",
+      "description": "在本地输出帧处分割，生成两个新 ID；有绑定效果或非整数源边界时明确拒绝。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "local_frame": {
+            "exclusiveMinimum": 0,
+            "title": "Local Frame",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip_id",
+          "local_frame"
+        ],
+        "title": "SplitArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_clip",
+      "description": "删除片段，连带删除其专属文字、音频、转场及配乐压低规则。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clip_id"
+        ],
+        "title": "ClipId",
+        "type": "object"
+      }
+    },
+    {
+      "name": "move_clip",
+      "description": "移动到指定片段之前；before_clip_id=null 表示末尾。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "before_clip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Before Clip Id"
+          }
+        },
+        "required": [
+          "clip_id"
+        ],
+        "title": "MoveArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "insert_clip",
+      "description": "插入一个视频或图片引用，不修改原素材。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Clip": {
+            "additionalProperties": false,
+            "properties": {
+              "clip_id": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+                "title": "Clip Id",
+                "type": "string"
+              },
+              "asset_id": {
+                "title": "Asset Id",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "video",
+                  "image"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "source_in_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Source In Frame",
+                "type": "integer"
+              },
+              "source_out_frame": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Source Out Frame"
+              },
+              "still_duration_frames": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Still Duration Frames"
+              },
+              "rate_num": {
+                "default": 1,
+                "exclusiveMinimum": 0,
+                "title": "Rate Num",
+                "type": "integer"
+              },
+              "rate_den": {
+                "default": 1,
+                "exclusiveMinimum": 0,
+                "title": "Rate Den",
+                "type": "integer"
+              },
+              "reverse": {
+                "default": false,
+                "title": "Reverse",
+                "type": "boolean"
+              },
+              "original_audio_gain_db": {
+                "default": 0,
+                "maximum": 12,
+                "minimum": -60,
+                "title": "Original Audio Gain Db",
+                "type": "number"
+              },
+              "transform": {
+                "$ref": "#/$defs/Transform"
+              },
+              "motion": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Motion"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "color_preset": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "warm",
+                      "cool",
+                      "monochrome"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Color Preset"
+              },
+              "derived_from_clip_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Derived From Clip Id"
+              }
+            },
+            "required": [
+              "clip_id",
+              "asset_id",
+              "kind"
+            ],
+            "title": "Clip",
+            "type": "object"
+          },
+          "Motion": {
+            "additionalProperties": false,
+            "properties": {
+              "preset_id": {
+                "enum": [
+                  "slow_push_in",
+                  "slow_pull_out",
+                  "pan_left",
+                  "pan_right",
+                  "pan_up",
+                  "pan_down"
+                ],
+                "title": "Preset Id",
+                "type": "string"
+              },
+              "preset_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Preset Version",
+                "type": "integer"
+              },
+              "local_start_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Local Start Frame",
+                "type": "integer"
+              },
+              "local_end_frame": {
+                "exclusiveMinimum": 0,
+                "title": "Local End Frame",
+                "type": "integer"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "intensity": {
+                "default": 0.12,
+                "exclusiveMinimum": 0,
+                "maximum": 0.5,
+                "title": "Intensity",
+                "type": "number"
+              },
+              "easing": {
+                "default": "ease_in_out",
+                "enum": [
+                  "linear",
+                  "ease_in_out"
+                ],
+                "title": "Easing",
+                "type": "string"
+              }
+            },
+            "required": [
+              "preset_id",
+              "local_end_frame"
+            ],
+            "title": "Motion",
+            "type": "object"
+          },
+          "Transform": {
+            "additionalProperties": false,
+            "properties": {
+              "fit": {
+                "default": "cover",
+                "enum": [
+                  "cover",
+                  "contain"
+                ],
+                "title": "Fit",
+                "type": "string"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "scale": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 1,
+                "title": "Scale",
+                "type": "number"
+              },
+              "rotation_deg": {
+                "default": 0,
+                "maximum": 15,
+                "minimum": -15,
+                "title": "Rotation Deg",
+                "type": "number"
+              }
+            },
+            "title": "Transform",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "clip": {
+            "$ref": "#/$defs/Clip"
+          },
+          "before_clip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Before Clip Id"
+          }
+        },
+        "required": [
+          "clip"
+        ],
+        "title": "InsertArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "replace_clip",
+      "description": "替换素材和参数，保留原片段 ID；关联效果必须仍然合法。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Clip": {
+            "additionalProperties": false,
+            "properties": {
+              "clip_id": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+                "title": "Clip Id",
+                "type": "string"
+              },
+              "asset_id": {
+                "title": "Asset Id",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "video",
+                  "image"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "source_in_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Source In Frame",
+                "type": "integer"
+              },
+              "source_out_frame": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Source Out Frame"
+              },
+              "still_duration_frames": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Still Duration Frames"
+              },
+              "rate_num": {
+                "default": 1,
+                "exclusiveMinimum": 0,
+                "title": "Rate Num",
+                "type": "integer"
+              },
+              "rate_den": {
+                "default": 1,
+                "exclusiveMinimum": 0,
+                "title": "Rate Den",
+                "type": "integer"
+              },
+              "reverse": {
+                "default": false,
+                "title": "Reverse",
+                "type": "boolean"
+              },
+              "original_audio_gain_db": {
+                "default": 0,
+                "maximum": 12,
+                "minimum": -60,
+                "title": "Original Audio Gain Db",
+                "type": "number"
+              },
+              "transform": {
+                "$ref": "#/$defs/Transform"
+              },
+              "motion": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Motion"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "color_preset": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "warm",
+                      "cool",
+                      "monochrome"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Color Preset"
+              },
+              "derived_from_clip_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Derived From Clip Id"
+              }
+            },
+            "required": [
+              "clip_id",
+              "asset_id",
+              "kind"
+            ],
+            "title": "Clip",
+            "type": "object"
+          },
+          "Motion": {
+            "additionalProperties": false,
+            "properties": {
+              "preset_id": {
+                "enum": [
+                  "slow_push_in",
+                  "slow_pull_out",
+                  "pan_left",
+                  "pan_right",
+                  "pan_up",
+                  "pan_down"
+                ],
+                "title": "Preset Id",
+                "type": "string"
+              },
+              "preset_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Preset Version",
+                "type": "integer"
+              },
+              "local_start_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Local Start Frame",
+                "type": "integer"
+              },
+              "local_end_frame": {
+                "exclusiveMinimum": 0,
+                "title": "Local End Frame",
+                "type": "integer"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "intensity": {
+                "default": 0.12,
+                "exclusiveMinimum": 0,
+                "maximum": 0.5,
+                "title": "Intensity",
+                "type": "number"
+              },
+              "easing": {
+                "default": "ease_in_out",
+                "enum": [
+                  "linear",
+                  "ease_in_out"
+                ],
+                "title": "Easing",
+                "type": "string"
+              }
+            },
+            "required": [
+              "preset_id",
+              "local_end_frame"
+            ],
+            "title": "Motion",
+            "type": "object"
+          },
+          "Transform": {
+            "additionalProperties": false,
+            "properties": {
+              "fit": {
+                "default": "cover",
+                "enum": [
+                  "cover",
+                  "contain"
+                ],
+                "title": "Fit",
+                "type": "string"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "scale": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 1,
+                "title": "Scale",
+                "type": "number"
+              },
+              "rotation_deg": {
+                "default": 0,
+                "maximum": 15,
+                "minimum": -15,
+                "title": "Rotation Deg",
+                "type": "number"
+              }
+            },
+            "title": "Transform",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "replacement": {
+            "$ref": "#/$defs/Clip"
+          }
+        },
+        "required": [
+          "clip_id",
+          "replacement"
+        ],
+        "title": "ReplaceArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_playback",
+      "description": "设置 0.5–2 倍速和倒放；渲染前由 FFmpeg 生成精确长度的派生媒体。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "rate_num": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Rate Num",
+            "type": "integer"
+          },
+          "rate_den": {
+            "default": 1,
+            "exclusiveMinimum": 0,
+            "title": "Rate Den",
+            "type": "integer"
+          },
+          "reverse": {
+            "default": false,
+            "title": "Reverse",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "clip_id"
+        ],
+        "title": "PlaybackArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_transform",
+      "description": "设置 cover/contain、锚点、缩放和基础旋转；cover 自动补足旋转覆盖范围。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Transform": {
+            "additionalProperties": false,
+            "properties": {
+              "fit": {
+                "default": "cover",
+                "enum": [
+                  "cover",
+                  "contain"
+                ],
+                "title": "Fit",
+                "type": "string"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "scale": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 1,
+                "title": "Scale",
+                "type": "number"
+              },
+              "rotation_deg": {
+                "default": 0,
+                "maximum": 15,
+                "minimum": -15,
+                "title": "Rotation Deg",
+                "type": "number"
+              }
+            },
+            "title": "Transform",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "transform": {
+            "$ref": "#/$defs/Transform"
+          }
+        },
+        "required": [
+          "clip_id",
+          "transform"
+        ],
+        "title": "TransformArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "apply_motion_preset",
+      "description": "应用缓推、缓拉、四向平移；motion=null 清除运镜。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Motion": {
+            "additionalProperties": false,
+            "properties": {
+              "preset_id": {
+                "enum": [
+                  "slow_push_in",
+                  "slow_pull_out",
+                  "pan_left",
+                  "pan_right",
+                  "pan_up",
+                  "pan_down"
+                ],
+                "title": "Preset Id",
+                "type": "string"
+              },
+              "preset_version": {
+                "const": 1,
+                "default": 1,
+                "title": "Preset Version",
+                "type": "integer"
+              },
+              "local_start_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Local Start Frame",
+                "type": "integer"
+              },
+              "local_end_frame": {
+                "exclusiveMinimum": 0,
+                "title": "Local End Frame",
+                "type": "integer"
+              },
+              "anchor_x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor X",
+                "type": "number"
+              },
+              "anchor_y": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Anchor Y",
+                "type": "number"
+              },
+              "intensity": {
+                "default": 0.12,
+                "exclusiveMinimum": 0,
+                "maximum": 0.5,
+                "title": "Intensity",
+                "type": "number"
+              },
+              "easing": {
+                "default": "ease_in_out",
+                "enum": [
+                  "linear",
+                  "ease_in_out"
+                ],
+                "title": "Easing",
+                "type": "string"
+              }
+            },
+            "required": [
+              "preset_id",
+              "local_end_frame"
+            ],
+            "title": "Motion",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "motion": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Motion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "clip_id",
+          "motion"
+        ],
+        "title": "MotionArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_transition",
+      "description": "设置相邻片段的叠化；duration_frames=0 清除。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "left_clip_id": {
+            "title": "Left Clip Id",
+            "type": "string"
+          },
+          "right_clip_id": {
+            "title": "Right Clip Id",
+            "type": "string"
+          },
+          "duration_frames": {
+            "minimum": 0,
+            "title": "Duration Frames",
+            "type": "integer"
+          },
+          "preset_id": {
+            "const": "dissolve",
+            "default": "dissolve",
+            "title": "Preset Id",
+            "type": "string"
+          },
+          "preset_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Preset Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "left_clip_id",
+          "right_clip_id",
+          "duration_frames"
+        ],
+        "title": "TransitionArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_color_preset",
+      "description": "应用暖色、冷色、黑白预设；preset_id=null 清除。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "enum": [
+                  "warm",
+                  "cool",
+                  "monochrome"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Id"
+          },
+          "preset_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Preset Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clip_id",
+          "preset_id"
+        ],
+        "title": "ColorArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_text",
+      "description": "添加可绑定片段或成片时间的文字。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Anchor": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "default": "timeline",
+                "enum": [
+                  "timeline",
+                  "clip"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "clip_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Clip Id"
+              },
+              "start_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Start Frame",
+                "type": "integer"
+              },
+              "end_frame": {
+                "exclusiveMinimum": 0,
+                "title": "End Frame",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "end_frame"
+            ],
+            "title": "Anchor",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          },
+          "anchor": {
+            "$ref": "#/$defs/Anchor"
+          },
+          "style_preset": {
+            "default": "title",
+            "enum": [
+              "title",
+              "subtitle"
+            ],
+            "title": "Style Preset",
+            "type": "string"
+          },
+          "x": {
+            "default": 0.5,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "default": 0.8,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Y",
+            "type": "number"
+          },
+          "font_size": {
+            "default": 48,
+            "maximum": 200,
+            "minimum": 8,
+            "title": "Font Size",
+            "type": "number"
+          },
+          "color": {
+            "default": "#ffffff",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Color",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "anchor"
+        ],
+        "title": "AddTextArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_text",
+      "description": "更新指定文字及样式，不修改视频中的人声。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "AddTextArgs": {
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "title": "Text",
+                "type": "string"
+              },
+              "anchor": {
+                "$ref": "#/$defs/Anchor"
+              },
+              "style_preset": {
+                "default": "title",
+                "enum": [
+                  "title",
+                  "subtitle"
+                ],
+                "title": "Style Preset",
+                "type": "string"
+              },
+              "x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "X",
+                "type": "number"
+              },
+              "y": {
+                "default": 0.8,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Y",
+                "type": "number"
+              },
+              "font_size": {
+                "default": 48,
+                "maximum": 200,
+                "minimum": 8,
+                "title": "Font Size",
+                "type": "number"
+              },
+              "color": {
+                "default": "#ffffff",
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "title": "Color",
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "anchor"
+            ],
+            "title": "AddTextArgs",
+            "type": "object"
+          },
+          "Anchor": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "default": "timeline",
+                "enum": [
+                  "timeline",
+                  "clip"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "clip_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Clip Id"
+              },
+              "start_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Start Frame",
+                "type": "integer"
+              },
+              "end_frame": {
+                "exclusiveMinimum": 0,
+                "title": "End Frame",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "end_frame"
+            ],
+            "title": "Anchor",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "text_id": {
+            "title": "Text Id",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/$defs/AddTextArgs"
+          }
+        },
+        "required": [
+          "text_id",
+          "value"
+        ],
+        "title": "UpdateTextArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "remove_text",
+      "description": "移除指定文字。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "text_id": {
+            "title": "Text Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text_id"
+        ],
+        "title": "TextId",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_audio",
+      "description": "添加独立配乐或音效，使用两条可叠加音轨。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Anchor": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "default": "timeline",
+                "enum": [
+                  "timeline",
+                  "clip"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "clip_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Clip Id"
+              },
+              "start_frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Start Frame",
+                "type": "integer"
+              },
+              "end_frame": {
+                "exclusiveMinimum": 0,
+                "title": "End Frame",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "end_frame"
+            ],
+            "title": "Anchor",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "anchor": {
+            "$ref": "#/$defs/Anchor"
+          },
+          "source_in_frame": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Source In Frame",
+            "type": "integer"
+          },
+          "track": {
+            "default": 1,
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Track",
+            "type": "integer"
+          },
+          "gain_db": {
+            "default": -12,
+            "maximum": 12,
+            "minimum": -60,
+            "title": "Gain Db",
+            "type": "number"
+          }
+        },
+        "required": [
+          "asset_id",
+          "anchor"
+        ],
+        "title": "AddAudioArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "remove_audio",
+      "description": "移除指定配乐及其淡变、压低规则。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_id": {
+            "title": "Audio Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "audio_id"
+        ],
+        "title": "AudioId",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_audio_gain",
+      "description": "以 dB 设置配乐或片段原声音量。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "default": "audio",
+            "enum": [
+              "audio",
+              "original"
+            ],
+            "title": "Target",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "gain_db": {
+            "maximum": 12,
+            "minimum": -60,
+            "title": "Gain Db",
+            "type": "number"
+          }
+        },
+        "required": [
+          "target_id",
+          "gain_db"
+        ],
+        "title": "GainArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_audio_fade",
+      "description": "设置配乐淡入淡出长度，单位为输出帧。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_id": {
+            "title": "Audio Id",
+            "type": "string"
+          },
+          "fade_in_frames": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Fade In Frames",
+            "type": "integer"
+          },
+          "fade_out_frames": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Fade Out Frames",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "audio_id"
+        ],
+        "title": "FadeArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "duck_music_for_clip",
+      "description": "片段期间压低指定配乐，规则随片段移动。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_id": {
+            "title": "Audio Id",
+            "type": "string"
+          },
+          "clip_id": {
+            "title": "Clip Id",
+            "type": "string"
+          },
+          "gain_db": {
+            "default": -12,
+            "maximum": 0,
+            "minimum": -60,
+            "title": "Gain Db",
+            "type": "number"
+          },
+          "ramp_frames": {
+            "default": 6,
+            "minimum": 0,
+            "title": "Ramp Frames",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "audio_id",
+          "clip_id"
+        ],
+        "title": "DuckArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_project_state",
+      "description": "读取草稿序号、基础版本、工程及派生时间线。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_assets",
+      "description": "列出当前项目已标准化的素材和真实元数据。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_presets",
+      "description": "列出当前已实现的预设、版本和参数范围。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "name": "validate_draft",
+      "description": "校验源区间、转场、锚点、时长及媒体引用。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_draft_diff",
+      "description": "比较草稿与其基础版本，返回变更对象。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "Empty",
+        "type": "object"
+      }
+    }
+  ]
+}

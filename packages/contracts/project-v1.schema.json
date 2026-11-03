@@ -1,0 +1,558 @@
+{
+  "$defs": {
+    "Anchor": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "timeline",
+          "enum": [
+            "timeline",
+            "clip"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "clip_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clip Id"
+        },
+        "start_frame": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Start Frame",
+          "type": "integer"
+        },
+        "end_frame": {
+          "exclusiveMinimum": 0,
+          "title": "End Frame",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end_frame"
+      ],
+      "title": "Anchor",
+      "type": "object"
+    },
+    "AudioItem": {
+      "additionalProperties": false,
+      "properties": {
+        "audio_id": {
+          "title": "Audio Id",
+          "type": "string"
+        },
+        "asset_id": {
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "source_in_frame": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source In Frame",
+          "type": "integer"
+        },
+        "track": {
+          "default": 1,
+          "enum": [
+            1,
+            2
+          ],
+          "title": "Track",
+          "type": "integer"
+        },
+        "gain_db": {
+          "default": -12,
+          "maximum": 12,
+          "minimum": -60,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "fade_in_frames": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Fade In Frames",
+          "type": "integer"
+        },
+        "fade_out_frames": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Fade Out Frames",
+          "type": "integer"
+        },
+        "ducks": {
+          "items": {
+            "$ref": "#/$defs/Duck"
+          },
+          "title": "Ducks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "audio_id",
+        "asset_id",
+        "anchor"
+      ],
+      "title": "AudioItem",
+      "type": "object"
+    },
+    "Clip": {
+      "additionalProperties": false,
+      "properties": {
+        "clip_id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,79}$",
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "asset_id": {
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "image"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "source_in_frame": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source In Frame",
+          "type": "integer"
+        },
+        "source_out_frame": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Out Frame"
+        },
+        "still_duration_frames": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Still Duration Frames"
+        },
+        "rate_num": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Rate Num",
+          "type": "integer"
+        },
+        "rate_den": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "title": "Rate Den",
+          "type": "integer"
+        },
+        "reverse": {
+          "default": false,
+          "title": "Reverse",
+          "type": "boolean"
+        },
+        "original_audio_gain_db": {
+          "default": 0,
+          "maximum": 12,
+          "minimum": -60,
+          "title": "Original Audio Gain Db",
+          "type": "number"
+        },
+        "transform": {
+          "$ref": "#/$defs/Transform"
+        },
+        "motion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Motion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "color_preset": {
+          "anyOf": [
+            {
+              "enum": [
+                "warm",
+                "cool",
+                "monochrome"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color Preset"
+        },
+        "derived_from_clip_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Derived From Clip Id"
+        }
+      },
+      "required": [
+        "clip_id",
+        "asset_id",
+        "kind"
+      ],
+      "title": "Clip",
+      "type": "object"
+    },
+    "Composition": {
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "default": 1920,
+          "maximum": 1920,
+          "minimum": 64,
+          "title": "Width",
+          "type": "integer"
+        },
+        "height": {
+          "default": 1080,
+          "maximum": 1920,
+          "minimum": 64,
+          "title": "Height",
+          "type": "integer"
+        },
+        "fps": {
+          "const": 30,
+          "default": 30,
+          "title": "Fps",
+          "type": "integer"
+        },
+        "audio_sample_rate": {
+          "const": 48000,
+          "default": 48000,
+          "title": "Audio Sample Rate",
+          "type": "integer"
+        },
+        "color_space": {
+          "const": "sdr_bt709",
+          "default": "sdr_bt709",
+          "title": "Color Space",
+          "type": "string"
+        }
+      },
+      "title": "Composition",
+      "type": "object"
+    },
+    "Duck": {
+      "additionalProperties": false,
+      "properties": {
+        "clip_id": {
+          "title": "Clip Id",
+          "type": "string"
+        },
+        "gain_db": {
+          "default": -12,
+          "maximum": 0,
+          "minimum": -60,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "ramp_frames": {
+          "default": 6,
+          "minimum": 0,
+          "title": "Ramp Frames",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "clip_id"
+      ],
+      "title": "Duck",
+      "type": "object"
+    },
+    "Motion": {
+      "additionalProperties": false,
+      "properties": {
+        "preset_id": {
+          "enum": [
+            "slow_push_in",
+            "slow_pull_out",
+            "pan_left",
+            "pan_right",
+            "pan_up",
+            "pan_down"
+          ],
+          "title": "Preset Id",
+          "type": "string"
+        },
+        "preset_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Preset Version",
+          "type": "integer"
+        },
+        "local_start_frame": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Local Start Frame",
+          "type": "integer"
+        },
+        "local_end_frame": {
+          "exclusiveMinimum": 0,
+          "title": "Local End Frame",
+          "type": "integer"
+        },
+        "anchor_x": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Anchor X",
+          "type": "number"
+        },
+        "anchor_y": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Anchor Y",
+          "type": "number"
+        },
+        "intensity": {
+          "default": 0.12,
+          "exclusiveMinimum": 0,
+          "maximum": 0.5,
+          "title": "Intensity",
+          "type": "number"
+        },
+        "easing": {
+          "default": "ease_in_out",
+          "enum": [
+            "linear",
+            "ease_in_out"
+          ],
+          "title": "Easing",
+          "type": "string"
+        }
+      },
+      "required": [
+        "preset_id",
+        "local_end_frame"
+      ],
+      "title": "Motion",
+      "type": "object"
+    },
+    "TextItem": {
+      "additionalProperties": false,
+      "properties": {
+        "text_id": {
+          "title": "Text Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "anchor": {
+          "$ref": "#/$defs/Anchor"
+        },
+        "style_preset": {
+          "default": "title",
+          "enum": [
+            "title",
+            "subtitle"
+          ],
+          "title": "Style Preset",
+          "type": "string"
+        },
+        "x": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "default": 0.8,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        },
+        "font_size": {
+          "default": 48,
+          "maximum": 200,
+          "minimum": 8,
+          "title": "Font Size",
+          "type": "number"
+        },
+        "color": {
+          "default": "#ffffff",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "title": "Color",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text_id",
+        "text",
+        "anchor"
+      ],
+      "title": "TextItem",
+      "type": "object"
+    },
+    "Transform": {
+      "additionalProperties": false,
+      "properties": {
+        "fit": {
+          "default": "cover",
+          "enum": [
+            "cover",
+            "contain"
+          ],
+          "title": "Fit",
+          "type": "string"
+        },
+        "anchor_x": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Anchor X",
+          "type": "number"
+        },
+        "anchor_y": {
+          "default": 0.5,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Anchor Y",
+          "type": "number"
+        },
+        "scale": {
+          "default": 1,
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Scale",
+          "type": "number"
+        },
+        "rotation_deg": {
+          "default": 0,
+          "maximum": 15,
+          "minimum": -15,
+          "title": "Rotation Deg",
+          "type": "number"
+        }
+      },
+      "title": "Transform",
+      "type": "object"
+    },
+    "Transition": {
+      "additionalProperties": false,
+      "properties": {
+        "left_clip_id": {
+          "title": "Left Clip Id",
+          "type": "string"
+        },
+        "right_clip_id": {
+          "title": "Right Clip Id",
+          "type": "string"
+        },
+        "preset_id": {
+          "const": "dissolve",
+          "default": "dissolve",
+          "title": "Preset Id",
+          "type": "string"
+        },
+        "preset_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Preset Version",
+          "type": "integer"
+        },
+        "duration_frames": {
+          "exclusiveMinimum": 0,
+          "title": "Duration Frames",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "left_clip_id",
+        "right_clip_id",
+        "duration_frames"
+      ],
+      "title": "Transition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "composition": {
+      "$ref": "#/$defs/Composition"
+    },
+    "clips": {
+      "items": {
+        "$ref": "#/$defs/Clip"
+      },
+      "title": "Clips",
+      "type": "array"
+    },
+    "transitions": {
+      "items": {
+        "$ref": "#/$defs/Transition"
+      },
+      "title": "Transitions",
+      "type": "array"
+    },
+    "text_items": {
+      "items": {
+        "$ref": "#/$defs/TextItem"
+      },
+      "title": "Text Items",
+      "type": "array"
+    },
+    "audio_items": {
+      "items": {
+        "$ref": "#/$defs/AudioItem"
+      },
+      "title": "Audio Items",
+      "type": "array"
+    }
+  },
+  "title": "Snapshot",
+  "type": "object"
+}
