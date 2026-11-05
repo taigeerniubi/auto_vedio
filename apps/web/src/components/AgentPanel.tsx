@@ -1,16 +1,10 @@
 // 展示智能体指令、真实执行进度、结果与可恢复的失败信息。
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Editor } from "../hooks/useEditor";
 import { Button, Icon } from "./Ui";
-
-const states = {
-  running: "正在剪辑",
-  completed: "编辑完成",
-  failed: "本次未完成",
-  cancelled: "已取消",
-  needs_input: "需要你的补充",
-  unsupported: "暂不支持",
-};
+import { Conversation } from "./Conversation";
+import { VoiceInput } from "./VoiceInput";
+import { Inspector } from "./Inspector";
 
 /** 渲染自然语言编辑入口及运行反馈。
  * Args:
@@ -22,221 +16,169 @@ const states = {
 export function AgentPanel({
   editor: e,
   onSettings,
+  onRecordStart,
 }: {
   editor: Editor;
   onSettings: () => void;
+  onRecordStart: () => void;
 }) {
   const [text, setText] = useState("");
-  const [showDiff, setShowDiff] = useState(false);
+  const [tab, setTab] = useState<"agent" | "inspector">("agent");
+  const input = useRef<HTMLTextAreaElement>(null);
   const selected = e.project?.snapshot.clips.find(
     (c) => c.clip_id === e.selected,
   );
   const name = e.assets.find((a) => a.asset_id === selected?.asset_id)?.name;
   const active = !!e.busy && e.busy === "AI 正在编辑";
   const submit = () => {
-    if (!text.trim() || e.busy || !e.project) return;
-    void e.command(text);
+    if (!text.trim() || e.busy || !e.project || !e.model?.configured) return;
+    void e.command(text.trim(), () => setText(""));
   };
-  const result = e.run?.result;
   return (
-    <div className="agent-panel">
-      <div className="agent-intro">
-        <h2>
-          <Icon name="spark" />
-          让想法，直接成片
-        </h2>
-        <p>说说你想怎么剪，剩下的交给我。</p>
-      </div>
-      <div className="conversation" aria-live="polite">
-        {!e.instruction && (
-          <div className="agent-welcome">
-            <div className="agent-avatar">
-              <Icon name="spark" />
-            </div>
-            <h3>你好，我是拾光。</h3>
-            <p>
-              从一个简单的想法开始。
-              <br />
-              裁短镜头、添加标题，或给画面一点运动。
-            </p>
-            <div className="capability-note">
-              先导入素材，再告诉我使用哪个文件。涉及画面内容时，请描述清楚。
-            </div>
-          </div>
-        )}
-        {e.instruction && (
-          <div className="user-message">
-            <small>你</small>
-            <p>{e.instruction}</p>
-          </div>
-        )}
-        {(active || e.run) && (
-          <div className="agent-message">
-            <div className="row">
-              <span className="agent-avatar">
-                <Icon name="spark" />
-              </span>
-              <strong>拾光</strong>
-              <small>{e.run ? states[e.run.status] : "开始处理…"}</small>
-            </div>
-            {e.run?.events.length ? (
-              <div className="execution-list">
-                {e.run.events
-                  .filter((x) => x.事件 === "工具执行" || x.事件 === "请求模型")
-                  .slice(-7)
-                  .map((event, index) => (
-                    <div key={index}>
-                      <span
-                        className={
-                          event.状态 === "失败" ? "failed-dot" : "success-dot"
-                        }
-                      >
-                        {event.状态 === "失败"
-                          ? "!"
-                          : event.事件 === "请求模型"
-                            ? "·"
-                            : "✓"}
-                      </span>
-                      <span>
-                        {event.事件 === "请求模型"
-                          ? `正在规划第 ${event.轮次} 轮操作`
-                          : event.状态 === "失败"
-                            ? event.原因 || "工具执行未通过"
-                            : "已执行 " + event.工具}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              active && <p className="muted">正在读取工程与素材…</p>
-            )}
-            {result && (
-              <p className={e.run?.status === "failed" ? "failure-text" : ""}>
-                {result.question || result.reason || result.summary}
-              </p>
-            )}
-            {!!result?.error_code && (
-              <small className="error-code">{result.error_code}</small>
-            )}
-            {e.run && (
-              <small className="run-id">运行编号：{e.run.run_id}</small>
-            )}
-            {e.run?.status === "needs_input" && (
-              <small>结合上面的要求补充说明，再次发送完整指令。</small>
-            )}
-            {e.run?.status === "completed" && (
-              <div className="row result-actions">
-                <Button
-                  disabled={!!e.busy}
-                  onClick={() => void e.history("undo")}
-                >
-                  撤销更改
-                </Button>
-                <Button tone="ghost" onClick={() => setShowDiff(!showDiff)}>
-                  查看修改
-                </Button>
-              </div>
-            )}
-            {showDiff && result?.diff && (
-              <div className="diff-summary">
-                {Object.keys(result.diff).length
-                  ? Object.keys(result.diff).map((key) => (
-                      <div key={key}>
-                        ✓　
-                        {{
-                          clips: "画面片段",
-                          text_items: "标题文字",
-                          audio_items: "配乐",
-                          transitions: "转场",
-                          composition: "画布设置",
-                        }[key] || key}
-                        已更新
-                      </div>
-                    ))
-                  : "本次没有修改工程。"}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      <div className="suggestions">
-        <small>还可以试试</small>
-        <div className="row">
-          {[
-            "给选中片段添加缓推效果",
-            "在开头添加标题「慢慢生活」",
-            "将选中片段变为黑白",
-          ].map((value, index) => (
+    <aside id="workspace-dock" className="right-panel panel" aria-label="剪辑助手与属性">
+      <header className="dock-header">
+        <div className="right-tabs" role="tablist" aria-label="右侧工具">
+          {(["agent", "inspector"] as const).map((id) => (
             <button
-              key={value}
-              disabled={!!e.busy}
-              onClick={() => setText(value)}
+              key={id}
+              id={`tab-${id}`}
+              role="tab"
+              aria-selected={tab === id}
+              aria-controls="dock-content"
+              tabIndex={tab === id ? 0 : -1}
+              onClick={() => setTab(id)}
+              onKeyDown={(event) => {
+                if (
+                  !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                    event.key,
+                  )
+                )
+                  return;
+                event.preventDefault();
+                const next =
+                  event.key === "Home"
+                    ? "agent"
+                    : event.key === "End"
+                      ? "inspector"
+                      : id === "agent"
+                        ? "inspector"
+                        : "agent";
+                setTab(next);
+                document.getElementById(`tab-${next}`)?.focus();
+              }}
             >
-              {["缓缓推进", "加个标题", "黑白质感"][index]}
+              <Icon name={id === "agent" ? "spark" : "sliders"} />
+              {id === "agent" ? "AI 助手" : "片段属性"}
             </button>
           ))}
         </div>
-      </div>
-      {!e.model?.configured && (
-        <button className="model-notice" onClick={onSettings}>
-          <span className="dot amber" />
-          连接模型后可使用 AI 编辑 <span>设置 ↗</span>
-        </button>
-      )}
-      <form
-        className="composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
-        <textarea
-          aria-label="剪辑指令"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="告诉我，你想怎么剪…"
-          rows={3}
-          maxLength={8000}
-          disabled={!!e.busy || !e.project}
-          onKeyDown={(event) => {
-            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-              event.preventDefault();
-              submit();
-            }
-          }}
+        <Button
+          tone="ghost"
+          icon="settings"
+          aria-label="模型设置"
+          title="模型设置"
+          onClick={onSettings}
         />
-        {selected && (
-          <div className="selection-chip" title={name}>
-            已选 · {name}
+      </header>
+      <div
+        id="dock-content"
+        role="tabpanel"
+        aria-labelledby={`tab-${tab}`}
+        className="dock-content"
+      >
+        {tab === "inspector" ? (
+          <Inspector editor={e} />
+        ) : (
+          <div className="agent-panel">
+            <Conversation
+              editor={e}
+              onSuggest={(value) => {
+                setText(value);
+                input.current?.focus();
+              }}
+            />
+            <div className="composer-dock">
+              <form
+                className="composer"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submit();
+                }}
+              >
+                {selected && (
+                  <div className="selection-chip" title={name}>
+                    已选 · {name}
+                  </div>
+                )}
+                <textarea
+                  ref={input}
+                  aria-label="剪辑指令"
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  placeholder="告诉我，你想怎么剪…"
+                  rows={2}
+                  maxLength={8000}
+                  disabled={!!e.busy || !e.project}
+                  onKeyDown={(event) => {
+                    if (
+                      event.nativeEvent.isComposing ||
+                      event.nativeEvent.keyCode === 229
+                    )
+                      return;
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      submit();
+                    }
+                  }}
+                />
+                <div className="composer-bottom">
+                  <VoiceInput
+                    editor={e}
+                    onStart={onRecordStart}
+                    onText={(value) =>
+                      setText((old) => (old ? `${old}\n${value}` : value))
+                    }
+                  />
+                  {active ? (
+                    <Button
+                      aria-label="取消AI运行"
+                      disabled={!e.activeRun}
+                      onClick={() => void e.cancel()}
+                    >
+                      取消
+                    </Button>
+                  ) : (
+                    <Button
+                      type="submit"
+                      tone="primary"
+                      icon="arrow"
+                      aria-label="发送剪辑指令"
+                      disabled={
+                        !text.trim() ||
+                        !!e.busy ||
+                        !e.project ||
+                        !e.model?.configured
+                      }
+                    />
+                  )}
+                </div>
+              </form>
+              <div className="composer-meta">
+                <button
+                  onClick={onSettings}
+                  title={e.model?.configured ? e.model.model : "配置剪辑模型"}
+                >
+                  <span
+                    className={`dot ${e.model?.configured ? "" : "amber"}`}
+                  />
+                  {e.model?.configured ? e.model.model : "连接剪辑模型"}
+                </button>
+                <small>Enter 发送 · Shift+Enter 换行</small>
+              </div>
+            </div>
           </div>
         )}
-        <div className="composer-bottom">
-          <small>
-            {e.model?.configured
-              ? `${e.model.provider === "openai" ? "OpenAI" : "DeepSeek"} · ${e.model.model}`
-              : "Ctrl + Enter 发送"}
-          </small>
-          {active ? (
-            <Button
-              aria-label="取消AI运行"
-              disabled={!e.run || e.run.status !== "running"}
-              onClick={() => void e.cancel()}
-            >
-              取消
-            </Button>
-          ) : (
-            <Button
-              type="submit"
-              tone="primary"
-              icon="arrow"
-              aria-label="发送剪辑指令"
-              disabled={
-                !text.trim() || !!e.busy || !e.project || !e.model?.configured
-              }
-            />
-          )}
-        </div>
-      </form>
-    </div>
+      </div>
+    </aside>
   );
 }

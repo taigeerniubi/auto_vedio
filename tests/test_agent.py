@@ -45,7 +45,7 @@ def test_loop_feedback_commit_dedupe_and_undo(context, caplog):
     assert agent.execute(pid, command()) == result and len(captured) == 1
     with pytest.raises(ToolError, match="相同 request_id"):
         agent.execute(pid, command().model_copy(update={"instruction": "不同指令"}))
-    assert all("事件" in json.loads(r.message) for r in caplog.records)
+    assert all("event" in json.loads(r.message) for r in caplog.records)
     assert store.history(pid, "undo", 1)["snapshot"]["clips"] == []
     assert store.history(pid, "redo", 2)["snapshot"]["clips"][0]["clip_id"] == "c1"
 
@@ -59,6 +59,24 @@ def test_error_feedback_can_be_repaired(context):
     result = Agent(store, lambda _: session).execute(pid, command())
     assert result["status"] == "completed", result
     assert store.project(pid)["snapshot"]["clips"][0]["source_out_frame"] == 30
+
+
+def test_live_monitor_exposes_only_open_draft(context):
+    store, pid, _ = context
+    def observe(results):
+        run = agent.runs.by_request(pid, "request-1")
+        live = run["live_draft"]
+        assert live["seq"] == 1 and live["base"] == 0
+        assert live["snapshot"]["clips"][0]["clip_id"] == "c1"
+        assert store.project(pid)["snapshot"]["clips"] == []
+        events = [e for e in run["events"] if e.get("工具") == "assemble_sequence"]
+        assert [e["事件"] for e in events] == ["开始工具", "工具执行"]
+        assert events[-1]["changed_ids"] == ["c1"] and events[-1]["draft_seq"] == 1
+        return [tc("ask_user", {"question": "保留哪一个镜头？"})]
+    agent = Agent(store, lambda _: ScriptSession([[assemble()], observe]))
+    result = agent.execute(pid, command())
+    assert result["status"] == "needs_input" and result["live_draft"] is None
+    assert store.project(pid)["revision"] == 0
 
 
 @pytest.mark.parametrize("steps,limits,expected", [

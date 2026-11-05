@@ -26,7 +26,7 @@ def test_agent_to_real_video(tmp_path):
     client = TestClient(create_app(tmp_path / "agent-media.sqlite3", session_factory=factory))
     pid = client.post("/api/v1/projects", json={"name": "智能体真实导出", "composition": {"width": 320, "height": 180}}).json()["project_id"]
     prefix = f"/api/v1/projects/{pid}"
-    assert client.post(prefix + "/assets/import", json={"path": "test-inputs/frame-red.mp4"}).status_code == 201
+    assert client.post(prefix + "/assets/import", json={"path": "test-inputs/frame-red.mp4"}).status_code == 200
     run = client.post(prefix + "/commands", json={"request_id": "agent-media-1", "instruction": "保留素材第 15 到 44 帧并转为黑白", "expected_revision": 0}).json()
     assert run["status"] == "completed", run
     rendered = client.post(prefix + "/render", json={"expected_revision": run["result"]["revision"]})

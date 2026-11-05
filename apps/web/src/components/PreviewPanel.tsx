@@ -6,6 +6,7 @@ import { post, projectPath } from "../api";
 import type { Preview, Project } from "../contracts";
 import { timecode } from "../timeline";
 import { Button, Icon } from "./Ui";
+import type { MotionDraft } from "./TemplatesPanel";
 
 /** 准备并播放与后端导出相同的合成清单。
  * Args:
@@ -23,12 +24,14 @@ export function PreviewPanel({
   frame,
   onFrame,
   onError,
+  motionDraft,
 }: {
   project: Project | null;
   player: RefObject<PlayerRef | null>;
   frame: number;
   onFrame: (frame: number) => void;
   onError: (error: unknown) => void;
+  motionDraft?: MotionDraft;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -95,15 +98,27 @@ export function PreviewPanel({
     };
   }, [preview]);
   const inputProps = useMemo(
-    () => (preview ? { plan: preview.plan } : null),
-    [preview],
+    () =>
+      preview
+        ? {
+            plan: {
+              ...preview.plan,
+              clips: preview.plan.clips.map((clip) =>
+                motionDraft?.clip_id === clip.clip_id
+                  ? { ...clip, motion: motionDraft.motion }
+                  : clip,
+              ),
+            },
+          }
+        : null,
+    [preview, motionDraft],
   );
   const width = project?.snapshot.composition.width || 1920,
     height = project?.snapshot.composition.height || 1080;
   return (
-    <section className="preview-panel panel" aria-label="成片预览">
+    <section id="workspace-monitor" className="preview-panel panel" aria-label="成片预览">
       <div className="panel-heading">
-        <h2>成片预览</h2>
+        <h2>{motionDraft ? "运镜预览 · 尚未应用" : "成片预览"}</h2>
         <div className="row">
           <span className="chip">{width > height ? "16:9" : "9:16"}</span>
           <span className="chip">

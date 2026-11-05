@@ -37,7 +37,7 @@ def test_uploaded_image_and_prepared_preview_are_project_scoped(tmp_path):
     source = BytesIO()
     Image.new("RGB", (320, 180), (80, 120, 160)).save(source, format="PNG")
     response = client.post(f"/api/v1/projects/{pid}/assets/upload?filename=browser-test.png", content=source.getvalue(), headers={"Content-Type": "application/octet-stream"})
-    assert response.status_code == 201, response.text
+    assert response.status_code == 200, response.text
     aid = response.json()["asset_id"]
     base = f"/api/v1/projects/{pid}"
     assert Path(response.json()["path"]).is_relative_to(DATABASE)

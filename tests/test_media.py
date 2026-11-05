@@ -14,12 +14,12 @@ from shiguang.media import ARTIFACTS, DATABASE, probe, verify_output
 def test_http_to_1080p_export(tmp_path):
     client = TestClient(create_app(tmp_path / "integration.sqlite3"))
     p = client.post("/api/v1/projects", json={"name": "1080p API integration"})
-    assert p.status_code == 201
+    assert p.status_code == 200
     pid = p.json()["project_id"]
     aids = []
     for filename in ["frame-red.mp4", "frame-blue-24fps.mp4", "portrait-silent.mp4", "music.wav"]:
         r = client.post(f"/api/v1/projects/{pid}/assets/import", json={"path": "test-inputs/" + filename})
-        assert r.status_code == 201, r.text
+        assert r.status_code == 200, r.text
         aids.append(r.json()["asset_id"])
     did = client.post(f"/api/v1/projects/{pid}/drafts").json()["id"]
     seq = 0

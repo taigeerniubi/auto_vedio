@@ -4,15 +4,18 @@ import type { PlayerRef } from "@remotion/player";
 import { useEditor } from "./hooks/useEditor";
 import { AssetsPanel, type Section } from "./components/AssetsPanel";
 import { AgentPanel } from "./components/AgentPanel";
-import { Inspector } from "./components/Inspector";
 import { Timeline } from "./components/Timeline";
+import { ResizableWorkspace } from "./components/ResizableWorkspace";
 import { Button, Icon, Modal } from "./components/Ui";
-import { layout } from "./timeline";
+import { anchorRange, layout } from "./timeline";
+import { progressLabel } from "./runProgress";
+import { TemplatesPanel, type MotionDraft } from "./components/TemplatesPanel";
 const PreviewPanel = lazy(() =>
   import("./components/PreviewPanel").then((module) => ({
     default: module.PreviewPanel,
   })),
 );
+const DraftMonitor = lazy(() => import("./components/DraftMonitor").then(module => ({default: module.DraftMonitor})));
 
 /** 装配可运行的剪辑工作台。
  * Returns:
@@ -20,12 +23,44 @@ const PreviewPanel = lazy(() =>
  */
 export function App() {
   const e = useEditor();
-  const [section, setSection] = useState<Section>("assets");
-  const [rightTab, setRightTab] = useState("agent");
+  const [section, setSection] = useState<Section | "templates">("assets");
+  const [motionDraft, setMotionDraft] = useState<MotionDraft>(null);
   const [dialog, setDialog] = useState<"project" | "settings" | null>(null);
   const [frame, setFrame] = useState(0);
   const player = useRef<PlayerRef>(null);
   const total = e.project ? layout(e.project.snapshot).total : 0;
+  const step = e.activeRun?.events.at(-1);
+  const activeStep = step && (step.事件 === "开始工具" || step.事件 === "请求模型")
+    ? progressLabel(step) : "";
+  const change = e.activeRun?.events.filter(event =>
+    event.事件 === "工具执行" && event.状态 === "成功" && event.changed_ids?.length &&
+    event.draft_seq === e.liveDraft?.seq).at(-1);
+  const changedIds = change?.changed_ids || [];
+  const focusKey = change && e.liveDraft ? `${e.activeRun?.run_id}-${e.liveDraft.seq}` : "";
+  useEffect(() => {
+    if (!e.liveDraft || !focusKey) return;
+    const snapshot = e.liveDraft.snapshot;
+    const effect = [...snapshot.text_items, ...snapshot.audio_items].find(item =>
+      changedIds.includes("text_id" in item ? item.text_id : item.audio_id));
+    const rows = layout(snapshot).rows;
+    const clips = rows.filter(row => changedIds.includes(row.clip.clip_id));
+    const row = change?.工具 === "set_transition" ? clips.at(-1) : clips[0];
+    let target = effect ? anchorRange(effect.anchor, snapshot)[0] : row?.start;
+    if (row && change?.工具 === "set_transition") {
+      const transition = snapshot.transitions.find(t => t.right_clip_id === row.clip.clip_id);
+      if (transition) target = row.start + Math.floor(transition.duration_frames / 2);
+    }
+    if (row?.clip.motion && change?.工具 === "apply_motion_preset") {
+      const motion = row.clip.motion;
+      target = row.start + Math.floor((motion.local_start_frame + motion.local_end_frame - 1) / 2);
+    }
+    if (target !== undefined) setFrame(target);
+  }, [focusKey]);
+  e.playhead.current = frame;
+  useEffect(
+    () => setMotionDraft(null),
+    [e.selected, e.project?.revision, e.project?.project_id, section],
+  );
   const seek = (target: number) => {
     setFrame(target);
     player.current?.seekTo(target);
@@ -36,7 +71,7 @@ export function App() {
       const target = event.target as HTMLElement;
       if (
         target.closest(
-          'input, textarea, select, [contenteditable="true"], dialog',
+          'input, textarea, select, [contenteditable="true"], [role="separator"], dialog',
         ) ||
         dialog
       )
@@ -86,7 +121,9 @@ export function App() {
           </button>
           <span className="save-status">
             <i className={`dot ${e.busy ? "amber" : ""}`} />
-            {e.busy || (e.project ? "所有更改已保存" : "本地视频工作台")}
+            {activeStep ||
+              e.busy ||
+              (e.project ? "所有更改已保存" : "本地视频工作台")}
           </span>
         </div>
         <div className="header-actions">
@@ -119,6 +156,12 @@ export function App() {
         <div className="error-banner" role="alert">
           <div>
             <strong>{e.error.message}</strong>
+            {e.error.status > 0 && (
+              <small>
+                HTTP {e.error.status}
+                {e.error.code ? ` · ${e.error.code}` : ""}
+              </small>
+            )}
             {e.error.requestId && (
               <small>
                 请求编号：{e.error.requestId} · 可在 logs/app.log 中定位
@@ -144,86 +187,88 @@ export function App() {
           </a>
         </div>
       )}
-      <main className="workspace">
-        <nav className="tool-rail" aria-label="编辑工具">
-          {(
-            [
-              ["assets", "folder", "素材"],
-              ["audio", "music", "音频"],
-              ["text", "text", "文字"],
-              ["transitions", "layers", "转场"],
-              ["color", "sliders", "调色"],
-            ] as const
-          ).map(([id, icon, label]) => (
-            <button
-              key={id}
-              className={section === id ? "active" : ""}
-              onClick={() => setSection(id)}
-              aria-current={section === id ? "page" : undefined}
-            >
-              <Icon name={icon} />
-              <span>{label}</span>
-            </button>
-          ))}
-          <button
-            className="rail-settings"
-            aria-label="模型设置"
-            onClick={() => setDialog("settings")}
-          >
-            <Icon name="settings" />
-          </button>
-        </nav>
-        <div className="editing-area">
-          <div className="media-area">
-            <AssetsPanel editor={e} section={section} />
-            <Suspense
-              fallback={
-                <section className="preview-panel panel">
-                  <div className="empty-preview">正在加载播放器…</div>
-                </section>
-              }
-            >
-              <PreviewPanel
-                project={e.project}
-                player={player}
-                frame={frame}
-                onFrame={setFrame}
-                onError={e.report}
-              />
-            </Suspense>
-          </div>
-          <Timeline editor={e} frame={frame} seek={seek} />
-        </div>
-        <aside className="right-panel panel">
-          <div className="right-tabs" role="tablist" aria-label="右侧工具">
-            <button
-              role="tab"
-              aria-selected={rightTab === "agent"}
-              className={rightTab === "agent" ? "active" : ""}
-              onClick={() => setRightTab("agent")}
-            >
-              AI 助手
-            </button>
-            <button
-              role="tab"
-              aria-selected={rightTab === "inspector"}
-              className={rightTab === "inspector" ? "active" : ""}
-              onClick={() => setRightTab("inspector")}
-            >
-              片段属性
-            </button>
-          </div>
-          {rightTab === "agent" ? (
-            <AgentPanel editor={e} onSettings={() => setDialog("settings")} />
+      <ResizableWorkspace>
+        <aside id="workspace-library" className="library-panel panel" aria-label="剪辑工具与素材">
+          <nav className="library-tools" aria-label="编辑工具">
+            {(
+              [
+                ["assets", "folder", "素材"],
+                ["audio", "music", "音频"],
+                ["text", "text", "文字"],
+                ["transitions", "layers", "转场"],
+                ["color", "sliders", "调色"],
+                ["templates", "spark", "模板"],
+              ] as const
+            ).map(([id, icon, label]) => (
+              <button
+                key={id}
+                className={section === id ? "active" : ""}
+                onClick={() => setSection(id)}
+                aria-current={section === id ? "page" : undefined}
+              >
+                <Icon name={icon} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
+          {section === "templates" ? (
+            <TemplatesPanel
+              editor={e}
+              draft={motionDraft}
+              onDraft={setMotionDraft}
+              onPreview={(target) => {
+                seek(target);
+                player.current?.play();
+              }}
+            />
           ) : (
-            <Inspector editor={e} />
+            <AssetsPanel editor={e} section={section} />
           )}
         </aside>
-      </main>
+        <Suspense
+          fallback={
+            <section id="workspace-monitor" className="preview-panel panel">
+              <div className="empty-preview">正在加载播放器…</div>
+            </section>
+          }
+        >
+          {e.liveDraft && e.project ? (
+            <DraftMonitor
+              project={e.project}
+              seq={e.liveDraft.seq}
+              assets={e.assets}
+              frame={frame}
+              seek={setFrame}
+            />
+          ) : (
+            <PreviewPanel
+              project={e.project}
+              player={player}
+              frame={frame}
+              onFrame={setFrame}
+              onError={e.report}
+              motionDraft={motionDraft}
+            />
+          )}
+        </Suspense>
+        <Timeline
+          editor={e}
+          frame={Math.max(0, Math.min(frame, total - 1))}
+          seek={seek}
+          changedIds={changedIds}
+        />
+        <AgentPanel
+          key={e.project?.project_id}
+          editor={e}
+          onSettings={() => setDialog("settings")}
+          onRecordStart={() => player.current?.pause()}
+        />
+      </ResizableWorkspace>
       <footer className="statusbar">
         <span>
           <span className="dot" />
           本地项目 {e.project ? `· 版本 ${e.project.revision}` : ""}
+          {e.liveDraft ? " · 草稿未提交" : ""}
         </span>
         <span>{e.busy || "准备就绪"}</span>
         <span>
@@ -330,6 +375,35 @@ export function App() {
             </pre>
             <small>
               密钥只在后端保存，无需输入到网页。未连接模型时，手动剪辑、预览与导出仍可使用。
+            </small>
+            <h3>素材理解与语音输入</h3>
+            {(["vision", "speech", "audio"] as const).map((kind) => (
+              <p key={kind}>
+                {
+                  { vision: "视觉模型", speech: "语音模型", audio: "音频问答" }[
+                    kind
+                  ]
+                }
+                ：
+                {e.perception?.[kind]?.configured
+                  ? e.perception[kind].model
+                  : "未配置"}
+              </p>
+            ))}
+            <p>
+              在根目录 .env
+              独立填写配置并重启。画面和对白可在导入时分析，音频问答在提问时调用。
+            </p>
+            <pre>
+              SHIGUANG_VISION_BASE_URL=兼容接口地址{"\n"}
+              SHIGUANG_VISION_MODEL=视觉模型{"\n"}SHIGUANG_VISION_API_KEY=密钥
+              {"\n\n"}SHIGUANG_SPEECH_BASE_URL=兼容接口地址{"\n"}
+              SHIGUANG_SPEECH_MODEL=语音模型{"\n"}SHIGUANG_SPEECH_API_KEY=密钥
+              {"\n"}SHIGUANG_SPEECH_RESPONSE_FORMAT=verbose_json
+              {"\n\n"}SHIGUANG_AUDIO_API_KEY=百炼密钥
+            </pre>
+            <small>
+              自动字幕需要语音模型返回句级时间戳。仅返回文本的接口仍可用于录音输入。
             </small>
           </div>
         </Modal>

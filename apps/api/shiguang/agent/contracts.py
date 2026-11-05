@@ -12,6 +12,7 @@ class Command(Model):
     instruction: str = Field(min_length=1, max_length=8000)
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
     selected_clip_ids: list[str] = Field(default_factory=list, max_length=40)
+    playhead_frame: Annotated[int, Field(strict=True, ge=0)] = 0
 
 
 class Finish(Model):

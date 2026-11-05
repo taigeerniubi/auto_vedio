@@ -17,10 +17,12 @@ export function Timeline({
   editor: e,
   frame,
   seek,
+  changedIds,
 }: {
   editor: Editor;
   frame: number;
   seek: (frame: number) => void;
+  changedIds: string[];
 }) {
   const [zoom, setZoom] = useState(1);
   const scroll = useRef<HTMLDivElement>(null);
@@ -37,6 +39,13 @@ export function Timeline({
   const { rows, total } = snapshot ? layout(snapshot) : { rows: [], total: 0 };
   const px = (Math.max(300, available - 40) / Math.max(total, 150)) * zoom;
   const width = Math.max(available, total * px + 40);
+  useEffect(() => {
+    const el = scroll.current;
+    if (!e.liveDraft || !el) return;
+    const point = frame * px;
+    if (point < el.scrollLeft || point > el.scrollLeft + el.clientWidth - 4)
+      el.scrollLeft = Math.max(0, point - el.clientWidth / 2);
+  }, [frame, px, e.liveDraft?.seq]);
   const disabled = !!e.busy || !e.project;
   const selected = rows.find((r) => r.clip.clip_id === e.selected);
   const split = () =>
@@ -65,10 +74,11 @@ export function Timeline({
   }
 
   return (
-    <section className="timeline panel" aria-label="时间线">
+    <section id="workspace-timeline" className="timeline panel" aria-label="时间线">
       <div className="timeline-toolbar">
         <div className="row">
-          <span className="tool-pointer">↖</span>
+          <h2>时间线</h2>
+          {e.liveDraft && <span className="live-label">实时草稿</span>}
           <Button
             icon="cut"
             tone="ghost"
@@ -89,7 +99,6 @@ export function Timeline({
             onClick={() => void e.edit("delete_clip", { clip_id: e.selected })}
           />
           <span className="divider" />
-          <h2>时间线</h2>
           <span className="chip">{timecode(total)}</span>
         </div>
         <label className="zoom-control">
@@ -160,6 +169,7 @@ export function Timeline({
                   <div
                     key={item.text_id}
                     className="text-block"
+                    data-changed={changedIds.includes(item.text_id)}
                     title={item.text}
                     style={{ left: start * px, width: (end - start) * px }}
                   >
@@ -177,6 +187,7 @@ export function Timeline({
                   <button
                     key={clip.clip_id}
                     className={`clip-block ${e.selected === clip.clip_id ? "selected" : ""}`}
+                    data-changed={changedIds.includes(clip.clip_id)}
                     style={{
                       left: start * px,
                       width: Math.max(10, (end - start) * px - 2),
@@ -210,6 +221,13 @@ export function Timeline({
                   </button>
                 );
               })}
+              {snapshot?.transitions.map(transition => {
+                const incoming = rows.find(row => row.clip.clip_id === transition.right_clip_id);
+                if (!incoming) return null;
+                return <span key={transition.right_clip_id} className="transition-block"
+                  aria-label={`叠化转场，${transition.duration_frames} 帧`}
+                  style={{left: incoming.start * px, width: transition.duration_frames * px}}>叠化</span>;
+              })}
               {!rows.length && (
                 <div className="timeline-empty">
                   将素材拖到这里，或点击素材上的 ＋
@@ -240,6 +258,7 @@ export function Timeline({
                   <div
                     key={item.audio_id}
                     className="music-block"
+                    data-changed={changedIds.includes(item.audio_id)}
                     style={{ left: start * px, width: (end - start) * px }}
                     title={
                       e.assets.find((a) => a.asset_id === item.asset_id)?.name
@@ -260,7 +279,7 @@ export function Timeline({
       </div>
       <footer className="timeline-footer">
         <span>{rows.length} 个片段　·　30 fps</span>
-        <span>空格 播放 / 暂停　　Ctrl Z 撤销</span>
+        <span>{e.liveDraft ? "点击标尺查看草稿" : "空格 播放 / 暂停　　Ctrl Z 撤销"}</span>
       </footer>
     </section>
   );

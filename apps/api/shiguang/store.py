@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from .models import Asset, Snapshot, timeline, validate_snapshot
 from .tools import TOOLS, ToolError, presets, uid
 from .observability import log_event, validation_details
+from . import editing_features  # 注册需要工程上下文的扩展工具。
 
 
 def dumps(value):
@@ -31,6 +32,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, base INTEGER NOT NULL, seq INTEGER NOT NULL, snapshot TEXT NOT NULL, status TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS operations(draft_id TEXT, op_id TEXT, hash TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(draft_id,op_id));
                 CREATE TABLE IF NOT EXISTS agent_runs(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, request_id TEXT NOT NULL, hash TEXT NOT NULL, draft_id TEXT NOT NULL UNIQUE, base INTEGER NOT NULL, status TEXT NOT NULL, result TEXT NOT NULL, events TEXT NOT NULL, UNIQUE(project_id,request_id));
+                CREATE TABLE IF NOT EXISTS agent_run_inputs(run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, instruction TEXT NOT NULL, created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS asset_analysis(project_id TEXT,asset_id TEXT,data TEXT NOT NULL,PRIMARY KEY(project_id,asset_id));
+                CREATE TABLE IF NOT EXISTS analysis_versions(id TEXT PRIMARY KEY,project_id TEXT,asset_id TEXT,data TEXT NOT NULL);
             """)
 
     @contextmanager
@@ -129,6 +133,27 @@ class Store:
             args = spec.arguments.model_validate(arguments)
         except ValidationError as exc:
             return {"ok": False, "error_code": "INVALID_ARGUMENTS", "summary": dumps(validation_details(exc.errors())), "changed_ids": [], "warnings": []}
+        if name in {"analyze_asset", "inspect_segment", "query_audio"}:
+            from .analysis import AnalysisService
+            draft = self.draft(did)
+            with self.connect() as con:
+                self.check_run_owner(con, did, run_id)
+            if draft["status"] != "open":
+                raise ToolError("DRAFT_CLOSED", "草稿已关闭")
+            service = getattr(self, "analysis_service", None) or AnalysisService(self)
+            try:
+                if name == "query_audio":
+                    data = service.query_audio(draft["project_id"], args.asset_id, args)
+                    summary = "音频查询完成，标记为素材母版上的估计时间"
+                elif name == "analyze_asset":
+                    data = service.analyze(draft["project_id"], args.asset_id, visual=args.visual, speech=args.speech)
+                    summary = "素材分析结果已更新，请检查各阶段状态"
+                else:
+                    data = service.inspect(draft["project_id"], args.asset_id, args.start_frame, args.end_frame)
+                    summary = "区间精查完成"
+                return {"ok": True, "draft_seq": draft["seq"], "data": data, "summary": summary, "warnings": [], "changed_ids": []}
+            except ToolError as exc:
+                return {"ok": False, "error_code": exc.code, "summary": str(exc), "warnings": [], "changed_ids": []}
         with self.connect() as c:
             c.execute("BEGIN IMMEDIATE")
             row = c.execute("SELECT * FROM drafts WHERE id=?", (did,)).fetchone()
@@ -146,6 +171,14 @@ class Store:
                     data = [a.model_dump() for a in assets.values()]
                 elif name == "list_presets":
                     data = presets()
+                elif name in {"search_segments", "get_asset_analysis"}:
+                    from .analysis import analysis_records, search_segments
+                    if name == "search_segments":
+                        data = search_segments(self, row["project_id"], args.query, c)
+                    else:
+                        if args.asset_id not in assets:
+                            return failure("ASSET_NOT_FOUND", "该工程中没有此素材")
+                        data = analysis_records(self, row["project_id"], c).get(args.asset_id)
                 elif name == "validate_draft":
                     data = {"errors": validate_snapshot(s, assets), "valid": not validate_snapshot(s, assets)}
                 else:
@@ -165,7 +198,11 @@ class Store:
             if row["seq"] != expected_seq:
                 return failure("DRAFT_CONFLICT", "草稿已变更，请重新读取")
             try:
-                changed, warnings = spec.handler(s, args)
+                if name == "generate_subtitles":
+                    from .analysis import analysis_records
+                    changed, warnings = spec.handler(s, args, analysis_records(self, row["project_id"], c))
+                else:
+                    changed, warnings = spec.handler(s, args)
                 # 重新解析可捕获绕过赋值校验的复制和列表变更。
                 s = Snapshot.model_validate(s.model_dump())
                 errors = validate_snapshot(s, assets)

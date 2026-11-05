@@ -81,6 +81,7 @@ export type ModelStatus = {
   model: string;
 };
 export type Run = {
+  live_draft?: { base: number; seq: number; snapshot: Snapshot } | null;
   run_id: string;
   project_id: string;
   status:
@@ -96,6 +97,7 @@ export type Run = {
     reason?: string;
     error_code?: string;
     revision?: number;
+    changed?: boolean;
     diff?: Record<string, unknown>;
   };
   events: {
@@ -104,12 +106,66 @@ export type Run = {
     工具?: string;
     状态?: string;
     原因?: string;
+    changed_ids?: string[];
+    draft_seq?: number;
   }[];
 };
 export type Preview = { revision: number; plan: Plan; warnings: string[] };
+export type ConversationEntry = Run & {
+  instruction: string | null;
+  created_at: string | null;
+};
+export type ConversationPage = {
+  items: ConversationEntry[];
+  next_cursor: number | null;
+};
 export type ExportResult = {
   revision: number;
   frames: number;
   download_url: string;
   warnings: string[];
+};
+
+export type PerceptionStatus = Record<
+  "vision" | "speech" | "audio",
+  { configured: boolean; model: string }
+>;
+export type AudioQueryResult = {
+  status: "matched" | "not_found" | "uncertain";
+  answer: string;
+  matches: {
+    label: string;
+    start_ms: number;
+    end_ms: number;
+    anchor_ms: number;
+    certainty: "high" | "medium" | "low";
+    evidence: string;
+  }[];
+};
+export type Analysis = {
+  status: string;
+  analysis_id: string;
+  asset_id: string;
+  stages: Record<
+    "visual" | "speech",
+    { status: string; reason_code: string | null; message?: string }
+  >;
+  segments: {
+    segment_id: string;
+    start_frame: number;
+    end_frame: number;
+    frame_ids: string[];
+    status: string;
+    visual: {
+      description: string;
+      tags: string[];
+      needs_review: boolean;
+      review_reasons: string[];
+    } | null;
+  }[];
+  speech: {
+    presence: string;
+    language: string | null;
+    utterances: { start_ms: number; end_ms: number; text: string }[];
+  };
 };

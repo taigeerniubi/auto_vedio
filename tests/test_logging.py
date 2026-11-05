@@ -9,7 +9,7 @@ import httpx
 from shiguang.agent.contracts import Limits
 from shiguang.agent.providers import ModelConfig, RemoteSession
 from shiguang.api import create_app
-from shiguang.observability import file_handler, log_context, log_event
+from shiguang.observability import file_handler, log_context, log_event, sanitize
 from fakes import ScriptSession, tc
 
 
@@ -25,7 +25,17 @@ def records(folder):
     return [json.loads(line) for line in (folder / "app.log").read_text(encoding="utf-8").splitlines()]
 
 
-def test_http_failures_and_200_tool_failure_written_to_file(tmp_path):
+def test_only_numeric_usage_counters_are_exempt_from_token_redaction():
+    """确保数字用量可诊断，认证 token 和伪装为计数的文本仍然脱敏。"""
+    data = sanitize({"input_tokens": 2000, "output_tokens": 16384, "max_output_tokens": 16384,
+                     "reasoning_tokens": "private-token", "total_tokens": {"secret": "private-token"},
+                     "access_token": "private-token", "token": 1234})
+    assert data["input_tokens"] == 2000 and data["output_tokens"] == 16384
+    assert data["max_output_tokens"] == 16384
+    assert all(data[key] == "[REDACTED]" for key in ("reasoning_tokens", "total_tokens", "access_token", "token"))
+
+
+def test_http_failures_and_tool_failure_written_to_file(tmp_path):
     folder = tmp_path / "logs"
     client = TestClient(create_app(tmp_path / "state.sqlite3", log_dir=folder))
     pid = client.post("/api/v1/projects", json={"name": "日志验收"}).json()["project_id"]
@@ -38,21 +48,21 @@ def test_http_failures_and_200_tool_failure_written_to_file(tmp_path):
         client.delete("/health"),
         client.post(prefix + f"/drafts/{did}/tools", json={"tool": "invented_tool"}),
     ]
-    assert [r.status_code for r in responses] == [404, 422, 404, 405, 200]
+    assert [r.status_code for r in responses] == [404, 422, 404, 405, 400]
     logs = records(folder)
-    expected = ["接口业务异常", "接口参数校验失败", "接口HTTP异常", "接口HTTP异常", "工具调用失败"]
+    expected = ["request_rejected", "request_validation_failed", "http_error", "http_error", "tool_failed"]
     for response, event in zip(responses, expected):
         rid = response.headers["X-Request-ID"]
-        matching = [item for item in logs if item.get("请求编号") == rid]
-        assert any(item["事件"] == event for item in matching)
-        assert any(item["事件"] == "接口请求结束" and item["HTTP状态码"] == response.status_code for item in matching)
-        assert all("接口" in item and "请求方法" in item for item in matching)
+        matching = [item for item in logs if item.get("request_id") == rid]
+        assert any(item["event"] == event for item in matching)
+        assert any(item["event"] == "request_completed" and item["status_code"] == response.status_code for item in matching)
+        assert all("route" in item and "method" in item for item in matching)
         if response.status_code != 200:
             assert response.json()["request_id"] == rid
-    business = next(item for item in logs if item["事件"] == "接口业务异常")
-    assert business["原因"] == "项目不存在" and business["异常链"][0]["调用栈"]
-    invalid = next(item for item in logs if item["事件"] == "接口参数校验失败")
-    assert invalid["参数错误"] and all("input" not in item for item in invalid["参数错误"])
+    business = next(item for item in logs if item["event"] == "request_rejected")
+    assert business["reason"] == "项目不存在" and business["exception_chain"][0]["stack"]
+    invalid = next(item for item in logs if item["event"] == "request_validation_failed")
+    assert invalid["validation_errors"] and all("input" not in item for item in invalid["validation_errors"])
     text = (folder / "app.log").read_text(encoding="utf-8")
     for private in ("private-input-not-to-log", "private-query-not-to-log", "private-header-not-to-log"):
         assert private not in text
@@ -75,12 +85,12 @@ def test_unexpected_exception_has_cause_stack_and_safe_500(tmp_path, monkeypatch
     response = TestClient(app).get("/test/crash")
     assert response.status_code == 500
     assert secret not in response.text and "读取工程失败" not in response.text
-    item = next(r for r in records(folder) if r["事件"] == "接口未处理异常")
-    assert item["请求编号"] == response.json()["request_id"]
-    assert item["异常类型"] == "RuntimeError" and item["原因"] == "读取工程失败"
-    assert item["异常链"][1]["异常类型"] == "ValueError"
-    assert "底层连接拒绝" in item["异常链"][1]["原因"]
-    assert any(frame["函数"] == "crash" and frame["行号"] > 0 for frame in item["异常链"][0]["调用栈"])
+    item = next(r for r in records(folder) if r["event"] == "request_failed")
+    assert item["request_id"] == response.json()["request_id"]
+    assert item["exception_type"] == "RuntimeError" and item["reason"] == "读取工程失败"
+    assert item["exception_chain"][1]["exception_type"] == "ValueError"
+    assert "底层连接拒绝" in item["exception_chain"][1]["reason"]
+    assert any(frame["function"] == "crash" and frame["line"] > 0 for frame in item["exception_chain"][0]["stack"])
     assert secret not in json.dumps(item, ensure_ascii=False)
 
 
@@ -118,15 +128,15 @@ def test_agent_error_and_provider_details_share_request_and_run(tmp_path):
     result = response.json()
     assert result["status"] == "failed" and result["result"]["error_code"] == "MODEL_HTTP_ERROR"
     logs = records(folder)
-    model = next(r for r in logs if r["事件"] == "模型HTTP请求失败")
-    agent = next(r for r in logs if r["事件"] == "智能体执行异常")
+    model = next(r for r in logs if r["event"] == "model_http_error")
+    agent = next(r for r in logs if r["event"] == "agent_failed")
     for item in (model, agent):
-        assert item["请求编号"] == response.headers["X-Request-ID"]
-        assert item["运行编号"] == result["run_id"]
-        assert item["接口"] == "/api/v1/projects/{pid}/commands"
-    assert model["服务商请求编号"] == "provider-request-1"
-    assert model["服务商错误码"] == "invalid_api_key"
-    assert "密钥已失效" in model["服务商原因"]
+        assert item["request_id"] == response.headers["X-Request-ID"]
+        assert item["run_id"] == result["run_id"]
+        assert item["route"] == "/api/v1/projects/{pid}/commands"
+    assert model["provider_request_id"] == "provider-request-1"
+    assert model["provider_error_code"] == "invalid_api_key"
+    assert "密钥已失效" in model["provider_reason"]
     text = (folder / "app.log").read_text(encoding="utf-8")
     assert all(private not in text for private in (secret, instruction, "private-debug-not-to-log"))
     assert "authentication_error" not in response.text
@@ -177,10 +187,10 @@ def test_agent_internal_error_and_invalid_tool_parameters_are_diagnostic(tmp_pat
         response = client.post(f"/api/v1/projects/{pid}/commands", json={"request_id": request_id, "instruction": "测试", "expected_revision": 0})
         assert response.json()["status"] == "failed"
     logs = records(folder)
-    tool = next(r for r in logs if r["事件"] == "工具调用失败")
-    assert "clips" in tool["原因"] and "list_type" in tool["原因"]
-    internal = next(r for r in logs if r["事件"] == "智能体未处理异常")
-    assert internal["原因"] == "模拟内部连接池失效" and internal["异常链"][0]["调用栈"]
+    tool = next(r for r in logs if r["event"] == "tool_failed")
+    assert "clips" in tool["reason"] and "list_type" in tool["reason"]
+    internal = next(r for r in logs if r["event"] == "agent_internal_error")
+    assert internal["reason"] == "模拟内部连接池失效" and internal["exception_chain"][0]["stack"]
     assert "private-input-for-tool" not in (folder / "app.log").read_text(encoding="utf-8")
 
 
@@ -193,8 +203,8 @@ def test_concurrent_requests_keep_separate_contexts(tmp_path):
     assert len(ids) == 12
     logs = records(folder)
     for rid in ids:
-        matched = [r for r in logs if r["请求编号"] == rid]
-        assert [r["事件"] for r in matched] == ["接口业务异常", "接口请求结束"]
+        matched = [r for r in logs if r["request_id"] == rid]
+        assert [r["event"] for r in matched] == ["request_rejected", "request_completed"]
 
 
 def test_rotation_utf8_and_context_reset(tmp_path):
@@ -203,13 +213,13 @@ def test_rotation_utf8_and_context_reset(tmp_path):
     handler.maxBytes, handler.backupCount = 600, 2
     with log_context(日志目录=folder):
         with log_context(请求编号="request-before-reset"):
-            log_event("上下文测试", level=logging.WARNING)
-        log_event("上下文已恢复")
-        assert "请求编号" not in records(folder)[-1]
+            log_event("context_test", level=logging.WARNING)
+        log_event("context_reset")
+        assert "request_id" not in records(folder)[-1]
         for number in range(10):
-            log_event("日志轮转测试", 序号=number, 原因="这是中文错误原因" * 8)
+            log_event("rotation_test", 序号=number, 原因="这是中文错误原因" * 8)
     assert (folder / "app.log.1").is_file() and (folder / "app.log.2").is_file()
     assert not (folder / "app.log.3").exists()
-    assert records(folder)[-1]["序号"] == 9
+    assert records(folder)[-1]["index"] == 9
     for path in folder.glob("app.log*"):
-        assert all(json.loads(line)["事件"] == "日志轮转测试" for line in path.read_text(encoding="utf-8").splitlines())
+        assert all(json.loads(line)["event"] == "rotation_test" for line in path.read_text(encoding="utf-8").splitlines())

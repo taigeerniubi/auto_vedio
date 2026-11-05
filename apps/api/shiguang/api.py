@@ -1,8 +1,10 @@
 """提供本机剪辑工具、智能体指令、运行查询和渲染接口。"""
 from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import Field
 
 from .media import ARTIFACTS, DATABASE, import_media, render_snapshot
@@ -12,7 +14,8 @@ from .tools import ToolError, definitions, uid
 from .agent.contracts import Command
 from .agent.loop import Agent
 from .http_logging import RequestLogMiddleware, install_error_handlers
-from .observability import LOG_DIR
+from .http_status import error_status
+from .observability import LOG_DIR, sanitize
 from .workspace_api import workspace_router
 
 
@@ -36,7 +39,7 @@ class RevisionRequest(Model):
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
 
 
-def create_app(db: Path | None = None, *, session_factory=None, agent_limits=None, log_dir: Path | None = None):
+def create_app(db: Path | None = None, *, session_factory=None, agent_limits=None, log_dir: Path | None = None, perception_factory=None):
     """装配本机 API，并允许测试注入模型会话。
 
     Args:
@@ -48,9 +51,20 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
     Returns:
         已注册工具及智能体路由的 FastAPI 应用。
     """
-    app = FastAPI(title="拾光 · 剪辑工具与智能体 API", version="0.2.0")
+    @asynccontextmanager
+    async def lifespan(_app):
+        # 仅在实际启动该应用时恢复；导入模块或创建隔离测试应用不会触碰其他运行中的任务。
+        service.recover_interrupted()
+        yield
+
+    app = FastAPI(title="拾光 · 剪辑工具与智能体 API", version="0.2.0", lifespan=lifespan)
     store = Store(db or DATABASE / "state.sqlite3")
     app.state.store = store
+    from .analysis import AnalysisService
+    from .analysis_api import analysis_router
+    service = AnalysisService(store, **({"provider_factory": perception_factory} if perception_factory else {}))
+    store.analysis_service = service
+    app.include_router(analysis_router(store, service))
     agent = Agent(store, **({"session_factory": session_factory} if session_factory else {}), limits=agent_limits)
     app.state.agent = agent
     app.add_middleware(RequestLogMiddleware, directory=log_dir or LOG_DIR)
@@ -65,7 +79,7 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
     def tools():
         return {"version": 1, "tools": definitions()}
 
-    @app.post("/api/v1/projects", status_code=201)
+    @app.post("/api/v1/projects")
     def create_project(req: ProjectRequest):
         return store.create_project(req.name, req.composition)
 
@@ -74,17 +88,25 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
         return store.project(pid)
 
     @app.post("/api/v1/projects/{pid}/commands")
-    def command(pid: str, req: Command):
+    def command(pid: str, req: Command, request: Request):
         """同步执行一次智能体指令。
 
         Args:
             pid: 项目编号。
             req: 用户指令和幂等请求编号。
+            request: 当前 HTTP 请求，提供日志关联编号。
 
         Returns:
             本次运行的最终状态或重复请求对应的正在运行状态。
         """
-        return agent.execute(pid, req)
+        run = agent.execute(pid, req)
+        if run["status"] in {"failed", "unsupported"}:
+            result = run["result"]
+            code = result.get("error_code", "UNSUPPORTED_OPERATION")
+            return JSONResponse(status_code=error_status(code), content=sanitize({**run, "ok": False,
+                "error_code": code, "summary": result.get("summary") or result.get("reason") or "Operation failed.",
+                "command_id": run["request_id"], "request_id": request.state.trace_id}))
+        return run
 
     @app.get("/api/v1/projects/{pid}/commands/{request_id}")
     def command_status(pid: str, request_id: str):
@@ -112,6 +134,20 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
         """
         return agent.runs.get(pid, rid)
 
+    @app.get("/api/v1/projects/{pid}/runs")
+    def conversation(pid: str, before: int | None = Query(default=None, ge=1), limit: int = Query(default=50, ge=1, le=100)):
+        """读取当前工程的历史指令和执行结果。
+
+        Args:
+            pid: 工程编号。
+            before: 可选的更早记录游标。
+            limit: 每页条数。
+
+        Returns:
+            包含历史对话与下一页游标的结果。
+        """
+        return agent.runs.conversation(pid, before=before, limit=limit)
+
     @app.post("/api/v1/projects/{pid}/runs/{rid}/cancel")
     def cancel_run(pid: str, rid: str):
         """取消正在执行的运行。
@@ -125,7 +161,7 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
         """
         return agent.cancel(pid, rid)
 
-    @app.post("/api/v1/projects/{pid}/assets/import", status_code=201)
+    @app.post("/api/v1/projects/{pid}/assets/import")
     def add_asset(pid: str, req: ImportRequest):
         return import_media(store, pid, req.path).model_dump()
 
@@ -134,7 +170,7 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
         store.project(pid)
         return [a.model_dump() for a in store.assets(pid).values()]
 
-    @app.post("/api/v1/projects/{pid}/drafts", status_code=201)
+    @app.post("/api/v1/projects/{pid}/drafts")
     def draft(pid: str):
         return store.create_draft(pid)
 
@@ -148,9 +184,13 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
         return store.draft(did)
 
     @app.post("/api/v1/projects/{pid}/drafts/{did}/tools")
-    def execute(pid: str, did: str, req: ToolRequest):
+    def execute(pid: str, did: str, req: ToolRequest, request: Request):
         check_draft(pid, did)
-        return store.call(did, req.tool, req.arguments, req.op_id, req.expected_seq)
+        result = store.call(did, req.tool, req.arguments, req.op_id, req.expected_seq)
+        if not result["ok"]:
+            return JSONResponse(status_code=error_status(result["error_code"]),
+                                content=sanitize({**result, "request_id": request.state.trace_id}))
+        return result
 
     @app.post("/api/v1/projects/{pid}/drafts/{did}/commit")
     def commit(pid: str, did: str):

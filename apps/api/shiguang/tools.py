@@ -13,8 +13,16 @@ from .models import (Anchor, AudioItem, Clip, Duck, Frame, Gain, Model, Motion,
 
 
 class ToolError(ValueError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, details: dict | None = None):
+        """保存稳定错误码、可读原因和已脱敏的诊断字段。
+
+        Args:
+            code: 用于分类和重试判断的错误码。
+            message: 用户和日志可以直接阅读的错误原因。
+            details: 可选的服务商状态等白名单诊断字段，不含密钥或原始请求。
+        """
         self.code = code
+        self.details = details or {}
         super().__init__(message)
 
 
@@ -381,6 +389,7 @@ def definitions():
     Returns:
         供 API、模型适配层和契约文件使用的工具列表。
     """
+    from . import editing_features
     return [{"name": k, "description": v.description, "writes_draft": v.handler is not None,
              "parameters": v.arguments.model_json_schema()} for k, v in TOOLS.items()]
 
@@ -391,7 +400,9 @@ def presets():
     Returns:
         按效果类型组织的预设信息。
     """
+    from .editing_features import STYLES
     return {"version": 1, "motion": {"ids": ["slow_push_in", "slow_pull_out", "pan_left", "pan_right", "pan_up", "pan_down"],
             "intensity": {"exclusive_min": 0, "max": 0.5}, "easing": ["linear", "ease_in_out"],
             "fit_required": "cover", "coverage": "覆盖范围在共享合成函数中解析计算，避免黑边"},
-            "color": ["warm", "cool", "monochrome"], "transition": ["dissolve"], "text": ["title", "subtitle"]}
+            "color": ["warm", "cool", "monochrome"], "transition": ["dissolve"], "text": ["title", "subtitle"],
+            "styles": STYLES}

@@ -1739,6 +1739,236 @@
         "title": "Empty",
         "type": "object"
       }
+    },
+    {
+      "name": "apply_style_preset",
+      "description": "对现有镜头应用整片风格：运镜、色调、转场、配乐音量。先按风格组织镜头长度；此工具不改变取段。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "preset_id": {
+            "enum": [
+              "calm_travel",
+              "bright_daily",
+              "ambient"
+            ],
+            "title": "Preset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset_id"
+        ],
+        "title": "StyleArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_composition",
+      "description": "调整横竖屏和画布尺寸；预览与导出使用相同画幅。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "width": {
+            "default": 1920,
+            "maximum": 1920,
+            "minimum": 64,
+            "title": "Width",
+            "type": "integer"
+          },
+          "height": {
+            "default": 1080,
+            "maximum": 1920,
+            "minimum": 64,
+            "title": "Height",
+            "type": "integer"
+          },
+          "fps": {
+            "const": 30,
+            "default": 30,
+            "title": "Fps",
+            "type": "integer"
+          },
+          "audio_sample_rate": {
+            "const": 48000,
+            "default": 48000,
+            "title": "Audio Sample Rate",
+            "type": "integer"
+          },
+          "color_space": {
+            "const": "sdr_bt709",
+            "default": "sdr_bt709",
+            "title": "Color Space",
+            "type": "string"
+          }
+        },
+        "title": "Composition",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_subtitles",
+      "description": "根据已完成的语音分析生成片段绑定字幕；空 clip_ids 表示所有视频。重复生成替换自动字幕，保留手动标题。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clip_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 40,
+            "title": "Clip Ids",
+            "type": "array"
+          }
+        },
+        "title": "SubtitleArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "query_audio",
+      "description": "根据任意问题听取音频素材或视频原声。可选 start_ms/end_ms 为素材母版毫秒；回答和候选锚点是模型估计，仅查询，不改草稿。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "start_ms": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Start Ms",
+            "type": "integer"
+          },
+          "end_ms": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "End Ms"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "asset_id"
+        ],
+        "title": "QueryAudioArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "search_segments",
+      "description": "按画面描述、标签或对白关键词检索已分析片段；返回真实源帧区间，空词列出候选。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "title": "SearchArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_asset_analysis",
+      "description": "读取素材的视觉证据、对白时间戳和各阶段状态。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id"
+        ],
+        "title": "AssetArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "analyze_asset",
+      "description": "通过已配置视觉/语音模型分析素材，缓存已完成阶段；调用可能耗时。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "visual": {
+            "default": true,
+            "title": "Visual",
+            "type": "boolean"
+          },
+          "speech": {
+            "default": true,
+            "title": "Speech",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asset_id"
+        ],
+        "title": "AnalyzeArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "inspect_segment",
+      "description": "对最多 30 秒的视频区间密集抽取九帧精查；不是逐帧动作定位。",
+      "writes_draft": false,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "start_frame": {
+            "minimum": 0,
+            "title": "Start Frame",
+            "type": "integer"
+          },
+          "end_frame": {
+            "exclusiveMinimum": 0,
+            "title": "End Frame",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asset_id",
+          "start_frame",
+          "end_frame"
+        ],
+        "title": "InspectArgs",
+        "type": "object"
+      }
     }
   ]
 }

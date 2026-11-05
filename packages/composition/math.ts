@@ -9,6 +9,7 @@ export type PreparedClip = {
   clip_id: string; asset_id: string; kind: 'video' | 'image'; file: string;
   start_frame: number; end_frame: number; duration_frames: number; width: number; height: number;
   transform: Transform; motion: Motion | null; color_preset: 'warm' | 'cool' | 'monochrome' | null;
+  sourcePlayback?: {inFrame: number; outFrame: number; numerator: number; denominator: number; reverse: boolean};
 };
 export type Plan = {
   composition: {width: number; height: number; fps: number};

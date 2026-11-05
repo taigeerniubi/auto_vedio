@@ -5,6 +5,7 @@ import type { LibraryFile, TextItem } from "../contracts";
 import type { Editor } from "../hooks/useEditor";
 import { duration, layout, timecode } from "../timeline";
 import { Button, Icon, Modal } from "./Ui";
+import { AssetAnalysis } from "./AssetAnalysis";
 
 export type Section = "assets" | "audio" | "text" | "transitions" | "color";
 
@@ -28,6 +29,7 @@ export function AssetsPanel({
   const [library, setLibrary] = useState<LibraryFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
+  const [analysisAsset, setAnalysisAsset] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const snapshot = e.project?.snapshot;
   const clip = snapshot?.clips.find((c) => c.clip_id === e.selected);
@@ -46,14 +48,17 @@ export function AssetsPanel({
 
   const media = e.assets.filter(
     (a) =>
-      (!search || a.name.toLowerCase().includes(search.toLowerCase())) &&
+      (!search ||
+        `${a.name} ${JSON.stringify(e.analyses[a.asset_id]?.segments || [])} ${JSON.stringify(e.analyses[a.asset_id]?.speech.utterances || [])}`
+          .toLowerCase()
+          .includes(search.toLowerCase())) &&
       (section === "audio"
         ? a.kind === "audio"
         : filter === "all" || a.kind === filter),
   );
 
   return (
-    <section className="asset-panel panel" aria-label="素材与效果">
+    <section className="asset-panel" aria-label="素材与效果">
       <div className="panel-heading">
         <h2>
           {
@@ -66,10 +71,7 @@ export function AssetsPanel({
             }[section]
           }
         </h2>
-        <Icon name="grid" />
-      </div>
-      {section === "assets" || section === "audio" ? (
-        <>
+        {(section === "assets" || section === "audio") && (
           <div className="asset-actions">
             <Button
               icon="plus"
@@ -78,15 +80,20 @@ export function AssetsPanel({
             >
               导入素材
             </Button>
-            <Button
-              tone="ghost"
-              disabled={disabled}
+            <button
+              className="quick-upload"
               title="从电脑上传"
               aria-label="从电脑上传"
-              icon="arrow"
+              disabled={disabled}
               onClick={() => fileInput.current?.click()}
-            />
+            >
+              <Icon name="arrow" />
+            </button>
           </div>
+        )}
+      </div>
+      {section === "assets" || section === "audio" ? (
+        <>
           <input
             ref={fileInput}
             hidden
@@ -95,14 +102,15 @@ export function AssetsPanel({
             accept="video/*,audio/*,.png,.jpg,.jpeg"
             onChange={(event) => {
               const files = Array.from(event.target.files || []);
-              if (files.length) void e.importFiles(files);
+              if (files.length)
+                void e.importFiles(files, () => setShowLibrary(false));
               event.target.value = "";
             }}
           />
           <label className="search">
             <input
               aria-label="搜索素材"
-              placeholder="搜索文件名…"
+              placeholder="搜索文件名、画面或对白…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -127,10 +135,6 @@ export function AssetsPanel({
               ))}
             </div>
           )}
-          <div className="asset-count">
-            <span className="dot" />
-            {media.length} 个素材已就绪<span className="muted">双击添加</span>
-          </div>
           <div className="asset-grid">
             {media.map((asset) => (
               <article
@@ -170,42 +174,66 @@ export function AssetsPanel({
                       : timecode(asset.total_frames).slice(0, 5)}
                   </span>
                 </button>
+                <div className="asset-info">
+                  <div className="asset-name" title={asset.name}>
+                    {asset.name}
+                  </div>
+                  <div className="asset-meta">
+                    <small>
+                      {asset.kind === "audio"
+                        ? "音频素材"
+                        : `${asset.width} × ${asset.height}`}
+                    </small>
+                    <button
+                      className="analysis-link"
+                      onClick={() => setAnalysisAsset(asset.asset_id)}
+                    >
+                      {e.analyses[asset.asset_id] ? "查看分析" : "分析素材"}
+                    </button>
+                  </div>
+                </div>
                 <button
                   className="asset-add"
-                  title={`添加 ${asset.name}`}
+                  title={`添加 ${asset.name} 到时间线`}
                   aria-label={`添加素材 ${asset.name}`}
                   disabled={disabled}
                   onClick={() => void e.addAsset(asset)}
                 >
                   +
                 </button>
-                <div className="asset-name" title={asset.name}>
-                  {asset.name}
-                </div>
-                <small>
-                  {asset.kind === "audio"
-                    ? "音频素材"
-                    : `${asset.width} × ${asset.height}`}
-                </small>
               </article>
             ))}
           </div>
           {!media.length && (
             <div className="empty-small">
               <Icon name="folder" />
-              <p>
-                {e.assets.length ? "没有匹配的素材" : "好故事，从一段素材开始"}
-              </p>
+              <p>{e.assets.length ? "没有匹配的素材" : "素材库为空"}</p>
               <span>
-                导入视频、图片或配乐
-                <br />
-                也可以从电脑上传
+                {e.assets.length
+                  ? "可以调整筛选条件或搜索词。"
+                  : "导入视频、图片或配乐后，可添加到时间线。"}
               </span>
             </div>
           )}
         </>
       ) : section === "text" ? (
         <div className="effect-content">
+          <div className="subtitle-actions">
+            <h3>自动对白字幕</h3>
+            <p className="muted">
+              先在素材分析中识别对白，再生成字幕；文字可在下方修改。
+            </p>
+            <Button
+              disabled={disabled || !total}
+              onClick={() =>
+                void e.edit("generate_subtitles", {
+                  clip_ids: clip ? [clip.clip_id] : [],
+                })
+              }
+            >
+              {clip ? "为选中片段生成字幕" : "为所有视频生成字幕"}
+            </Button>
+          </div>
           <p className="muted">为画面留下一句话。</p>
           <form
             onSubmit={(event) => {
@@ -321,6 +349,16 @@ export function AssetsPanel({
           {!clip && <small>请先在时间线中选择一个片段。</small>}
         </div>
       )}
+      {analysisAsset &&
+        e.project &&
+        e.assets.some((a) => a.asset_id === analysisAsset) && (
+          <AssetAnalysis
+            key={analysisAsset}
+            editor={e}
+            aid={analysisAsset}
+            onClose={() => setAnalysisAsset(null)}
+          />
+        )}
       {showLibrary && (
         <Modal
           title="导入素材"
@@ -331,6 +369,12 @@ export function AssetsPanel({
           <p className="muted">
             从项目的 database 文件夹选择素材，或从电脑上传。
           </p>
+          {e.error && (
+            <p role="alert" className="failure-text">
+              {e.error.message}
+            </p>
+          )}
+          {e.busy && <p role="status">{e.busy}，正在处理，请稍候…</p>}
           <div className="library-list">
             {loading ? (
               <p>正在读取素材目录…</p>
@@ -365,7 +409,6 @@ export function AssetsPanel({
               icon="arrow"
               disabled={!!e.busy}
               onClick={() => {
-                setShowLibrary(false);
                 fileInput.current?.click();
               }}
             >
@@ -374,9 +417,8 @@ export function AssetsPanel({
             <Button
               tone="primary"
               disabled={!checked.length || !!e.busy}
-              onClick={async () => {
-                await e.importFiles(checked);
-                setShowLibrary(false);
+              onClick={() => {
+                void e.importFiles(checked, () => setShowLibrary(false));
               }}
             >
               {e.busy || `导入所选 ${checked.length || ""}`}

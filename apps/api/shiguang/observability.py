@@ -1,4 +1,4 @@
-"""统一生成脱敏的中文结构化日志并写入可轮转的日志文件。"""
+"""统一生成脱敏的英文结构化日志并写入终端和可轮转文件。"""
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 from threading import RLock
+from .log_format import ConsoleFormatter, english_record
 
 LOG_DIR = Path(__file__).resolve().parents[3] / "logs"
 _CONTEXT = ContextVar("shiguang_log_context", default={})
@@ -16,8 +17,12 @@ _FILES = {}
 _LOCK = RLock()
 LOGGER = logging.getLogger("shiguang")
 LOGGER.setLevel(logging.INFO)
+TOKEN_COUNT_FIELDS = {"max_output_tokens", "input_tokens", "output_tokens", "reasoning_tokens", "total_tokens"}
 if not LOGGER.handlers:
-    LOGGER.addHandler(logging.StreamHandler())
+    console = logging.StreamHandler()
+    if os.getenv("SHIGUANG_LOG_CONSOLE") != "json":
+        console.setFormatter(ConsoleFormatter())
+    LOGGER.addHandler(console)
 
 
 def sanitize(value, secrets=()):
@@ -30,9 +35,10 @@ def sanitize(value, secrets=()):
     Returns:
         可安全序列化的字段副本。
     """
-    known = [s for s in (*secrets, os.getenv("SHIGUANG_MODEL_API_KEY", "")) if isinstance(s, str) and s]
+    known = [s for s in (*secrets, *(os.getenv(f"SHIGUANG_{kind}_API_KEY", "") for kind in ("MODEL", "VISION", "SPEECH", "AUDIO"))) if isinstance(s, str) and s]
     if isinstance(value, dict):
-        return {str(k): "[已脱敏]" if re.search(r"authorization|api[_-]?key|password|cookie|secret|token|密钥|密码", str(k), re.I)
+        return {str(k): "[REDACTED]" if re.search(r"authorization|api[_-]?key|password|cookie|secret|token|密钥|密码", str(k), re.I)
+                and not (str(k) in TOKEN_COUNT_FIELDS and type(v) is int and v >= 0)
                 else sanitize(v, known) for k, v in value.items()}
     if isinstance(value, (tuple, list)):
         return [sanitize(v, known) for v in value]
@@ -40,12 +46,12 @@ def sanitize(value, secrets=()):
         return value
     text = str(value)
     for secret in sorted(set(known), key=len, reverse=True):
-        text = text.replace(secret, "[已脱敏]")
-    text = re.sub(r"(?i)Bearer\s+[^\s\"',;]+", "Bearer [已脱敏]", text)
-    text = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[已脱敏]", text)
-    text = re.sub(r"(?i)((?:api[_-]?key|password|token|secret|密码|密钥)[\"']?\s*[:=]\s*[\"']?)[^\s\"'&,;}]+", r"\1[已脱敏]", text)
-    text = re.sub(r"(https?://)[^/@\s]+:[^/@\s]+@", r"\1[已脱敏]@", text)
-    return text[:6000] + ("…[已截断]" if len(text) > 6000 else "")
+        text = text.replace(secret, "[REDACTED]")
+    text = re.sub(r"(?i)Bearer\s+[^\s\"',;]+", "Bearer [REDACTED]", text)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", text)
+    text = re.sub(r"(?i)((?:api[_-]?key|password|token|secret|密码|密钥)[\"']?\s*[:=]\s*[\"']?)[^\s\"'&,;}]+", r"\1[REDACTED]", text)
+    text = re.sub(r"(https?://)[^/@\s]+:[^/@\s]+@", r"\1[REDACTED]@", text)
+    return text[:6000] + ("...[TRUNCATED]" if len(text) > 6000 else "")
 
 
 def exception_details(error, secrets=()):
@@ -81,7 +87,7 @@ def validation_details(errors):
     Returns:
         不包含输入值的中文错误条目。
     """
-    return sanitize([{"字段": list(e["loc"]), "错误类型": e["type"], "原因": e["msg"]} for e in errors[:50]])
+    return sanitize([{"field": list(e["loc"]), "error_type": e["type"], "reason": e["msg"]} for e in errors[:50]])
 
 
 @contextmanager
@@ -119,7 +125,7 @@ def file_handler(directory):
 
 
 def log_event(event, *, level=logging.INFO, error=None, secrets=(), logger="shiguang", **fields):
-    """同时输出中文 JSON 到控制台和日志文件。
+    """向文件输出英文 JSON，向终端输出易读文本和异常链。
 
     Args:
         event: 事件名称。
@@ -130,16 +136,15 @@ def log_event(event, *, level=logging.INFO, error=None, secrets=(), logger="shig
         **fields: 事件详情，不应包含完整请求体或模型上下文。
     """
     context = dict(_CONTEXT.get())
-    directory = context.pop("日志目录", LOG_DIR)
+    directory = context.pop("log_dir", context.pop("日志目录", LOG_DIR))
     scope = context.pop("_http_scope", None)
     if scope is not None:
-        context["接口"] = getattr(scope.get("route"), "path", "未匹配路由")
-    labels = {logging.DEBUG: "调试", logging.INFO: "信息", logging.WARNING: "警告", logging.ERROR: "错误", logging.CRITICAL: "严重"}
-    item = {"时间": datetime.now(timezone.utc).isoformat(), "级别": labels.get(level, str(level)),
-            **context, "事件": event, **fields}
+        context["route"] = getattr(scope.get("route"), "path", "unmatched")
+    item = {"timestamp": datetime.now(timezone.utc).isoformat(), "level": logging.getLevelName(level),
+            **context, "event": event, **fields}
     if error is not None:
         item.update(exception_details(error, secrets))
-    message = json.dumps(sanitize(item, secrets), ensure_ascii=False, allow_nan=False)
+    message = json.dumps(sanitize(english_record(item), secrets), ensure_ascii=False, allow_nan=False)
     record = logging.LogRecord(logger, level, "", 0, message, (), None)
     file_handler(directory).handle(record)
     logging.getLogger(logger).log(level, message)

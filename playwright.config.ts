@@ -7,7 +7,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: process.env.SHIGUANG_WEB_TEST_URL || "http://127.0.0.1:5173",
     viewport: { width: 1600, height: 1000 },
     launchOptions: {
       executablePath:

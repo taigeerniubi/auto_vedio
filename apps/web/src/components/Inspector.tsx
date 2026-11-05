@@ -2,6 +2,7 @@
 import type { Editor } from "../hooks/useEditor";
 import { duration } from "../timeline";
 import { Button, Icon } from "./Ui";
+import { thumbnailUrl } from "../api";
 
 /** 将选中片段的属性提交给后端确定性工具。
  * Args:
@@ -21,21 +22,27 @@ export function Inspector({ editor: e }: { editor: Editor }) {
       {!clip ? (
         <div className="empty-small">
           <Icon name="sliders" />
-          <p>让每个镜头，恰到好处</p>
-          <span>
-            在时间线中选择一个片段
-            <br />
-            调整时长、构图和声音
-          </span>
+          <p>选择一个片段</p>
+          <span>点击时间线上的画面，即可调整时长、构图和声音。</span>
         </div>
       ) : (
-        <div key={`${clip.clip_id}-${e.project!.revision}`}>
+        <div
+          key={`${clip.clip_id}-${e.project!.revision}-${e.liveDraft?.seq ?? 0}`}
+        >
           <div className="inspector-title">
-            <h3>{asset?.name}</h3>
-            <small>
-              {asset?.width} × {asset?.height}　·　
-              {(duration(clip) / 30).toFixed(2)} 秒
-            </small>
+            {asset && (
+              <img
+                alt=""
+                src={thumbnailUrl(e.project!.project_id, asset.asset_id)}
+              />
+            )}
+            <div>
+              <h3 title={asset?.name}>{asset?.name}</h3>
+              <small>
+                {asset?.width} × {asset?.height}　·　
+                {(duration(clip) / 30).toFixed(2)} 秒
+              </small>
+            </div>
           </div>
           <section>
             <h4>时长与裁切</h4>

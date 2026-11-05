@@ -74,7 +74,7 @@ def workspace_router(store):
                     return found
         return found
 
-    @router.post("/projects/{pid}/assets/upload", status_code=201)
+    @router.post("/projects/{pid}/assets/upload")
     async def upload(pid: str, request: Request, filename: str = Query(min_length=1, max_length=200)):
         """接收浏览器上传的单个素材并导入工程。
 
@@ -87,7 +87,8 @@ def workspace_router(store):
             已导入的素材记录。
         """
         store.project(pid)
-        name = Path(filename.replace("\\", "/")).name
+        # 先按文本取文件名，避免 Windows Path 自动丢弃 C: 之类的非法前缀。
+        name = filename.replace("\\", "/").rsplit("/", 1)[-1]
         if Path(name).suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm", ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".m4a", ".aac"}:
             raise ToolError("UNSUPPORTED_MEDIA", "请选择视频、图片或音频文件")
         if any(ch in name for ch in '<>:"|?*') or name in {".", ".."}:
@@ -141,7 +142,7 @@ def workspace_router(store):
         return FileResponse(path)
 
     @router.get("/projects/{pid}/assets/{aid}/thumbnail")
-    def thumbnail(pid: str, aid: str):
+    def thumbnail(pid: str, aid: str, pad: bool = True):
         """生成并缓存视频或图片的缩略图。
 
         Args:
@@ -154,12 +155,15 @@ def workspace_router(store):
         asset, path = asset_file(pid, aid)
         if asset.kind == "audio":
             raise ToolError("THUMBNAIL_NOT_FOUND", "音频没有画面缩略图")
-        target = contained(ARTIFACTS / "thumbnails" / f"{aid}.jpg", ARTIFACTS / "thumbnails")
+        target = contained(ARTIFACTS / "thumbnails" / f"{aid}{'' if pad else '-source'}.jpg", ARTIFACTS / "thumbnails")
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
             temp = target.with_name(uid("thumb") + ".jpg")
             try:
-                ffmpeg("-i", path, "-frames:v", 1, "-vf", "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2", temp)
+                filters = "scale=320:180:force_original_aspect_ratio=decrease"
+                if pad:
+                    filters += ",pad=320:180:(ow-iw)/2:(oh-ih)/2"
+                ffmpeg("-i", path, "-frames:v", 1, "-vf", filters, temp)
                 temp.replace(target)
             finally:
                 temp.unlink(missing_ok=True)

@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException
 
 from .observability import file_handler, log_context, log_event, sanitize, validation_details
 from .tools import ToolError
+from .http_status import error_status
 
 
 class RequestLogMiddleware:
@@ -51,20 +52,24 @@ class RequestLogMiddleware:
                 message = {**message, "headers": headers + [(b"x-request-id", request_id.encode())]}
             await send(message)
 
-        with log_context(请求编号=request_id, 请求方法=scope["method"], 日志目录=self.directory, _http_scope=scope):
+        with log_context(request_id=request_id, method=scope["method"], path=scope["path"],
+                         log_dir=self.directory, _http_scope=scope):
             try:
                 await self.app(scope, receive, tracked_send)
             except Exception as exc:
-                route = getattr(scope.get("route"), "path", "未匹配路由")
-                log_event("接口未处理异常", level=logging.ERROR, error=exc, 接口=route, HTTP状态码=500)
+                route = getattr(scope.get("route"), "path", "unmatched")
+                log_event("request_failed", level=logging.ERROR, error=exc, route=route, status_code=500)
                 if response_started:
                     raise
                 response = JSONResponse(status_code=500, content={"ok": False, "error_code": "INTERNAL_ERROR",
-                    "summary": "服务器内部异常，请凭 request_id 查询日志", "request_id": request_id})
+                    "summary": "Internal server error. See the ERROR traceback in logs/app.log using request_id.",
+                    "exception_type": type(exc).__name__, "request_id": request_id})
                 await response(scope, receive, tracked_send)
             finally:
-                route = getattr(scope.get("route"), "path", "未匹配路由")
-                log_event("接口请求结束", 接口=route, HTTP状态码=status, 耗时毫秒=round((monotonic() - started) * 1000, 2))
+                route = getattr(scope.get("route"), "path", "unmatched")
+                level = logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
+                log_event("request_completed", level=level, route=route, status_code=status,
+                          duration_ms=round((monotonic() - started) * 1000, 2))
 
 
 def install_error_handlers(app):
@@ -84,11 +89,12 @@ def install_error_handlers(app):
         Returns:
             含请求编号的错误响应。
         """
-        status = 404 if error.code.endswith("NOT_FOUND") else 409 if "CONFLICT" in error.code else 400
-        log_event("接口业务异常", level=logging.WARNING, error=error, 接口=request.scope["route"].path,
-                  错误代码=error.code, HTTP状态码=status)
+        status = error_status(error.code)
+        log_event("request_failed" if status >= 500 else "request_rejected",
+                  level=logging.ERROR if status >= 500 else logging.WARNING, error=error,
+                  route=request.scope["route"].path, error_code=error.code, status_code=status)
         return JSONResponse(status_code=status, content={"ok": False, "error_code": error.code,
-            "summary": sanitize(str(error)), "request_id": request.state.trace_id})
+            "summary": sanitize(str(error)), "details": sanitize(error.details), "request_id": request.state.trace_id})
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, error):
@@ -102,10 +108,11 @@ def install_error_handlers(app):
             不包含原始输入值的 422 响应。
         """
         details = validation_details(error.errors())
-        log_event("接口参数校验失败", level=logging.WARNING, 接口=request.scope["route"].path,
-                  错误代码="REQUEST_VALIDATION_ERROR", HTTP状态码=422, 参数错误=details)
+        summary = "; ".join(f"{'.'.join(map(str, e['field']))}: {e['reason']}" for e in details)
+        log_event("request_validation_failed", level=logging.WARNING, route=request.scope["route"].path,
+                  error_code="REQUEST_VALIDATION_ERROR", status_code=422, reason=summary, validation_errors=details)
         return JSONResponse(status_code=422, content={"ok": False, "error_code": "REQUEST_VALIDATION_ERROR",
-            "summary": "请求参数不符合接口约束", "detail": details, "request_id": request.state.trace_id})
+            "summary": summary, "detail": details, "request_id": request.state.trace_id})
 
     @app.exception_handler(HTTPException)
     async def http_error(request, error):
@@ -119,7 +126,8 @@ def install_error_handlers(app):
             保留状态码和必要响应头的错误响应。
         """
         detail = sanitize(error.detail)
-        log_event("接口HTTP异常", level=logging.WARNING, 接口=getattr(request.scope.get("route"), "path", "未匹配路由"),
-                  HTTP状态码=error.status_code, 原因=detail)
+        log_event("http_error", level=logging.ERROR if error.status_code >= 500 else logging.WARNING,
+                  route=getattr(request.scope.get("route"), "path", "unmatched"),
+                  status_code=error.status_code, reason=detail)
         return JSONResponse(status_code=error.status_code, headers=error.headers,
                             content={"detail": detail, "request_id": request.state.trace_id})

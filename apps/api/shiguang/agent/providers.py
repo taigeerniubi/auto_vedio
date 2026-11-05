@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ..tools import ToolError
-from ..observability import log_event
+from ..observability import log_event, sanitize
 from .contracts import ToolCall
 from .prompts import SYSTEM_PROMPT, tool_definitions
 
@@ -19,6 +19,7 @@ class ModelConfig:
     model: str
     api_key: str = field(repr=False)
     base_url: str = ""
+    max_output_tokens: int = 16384
 
     @classmethod
     def from_env(cls):
@@ -30,9 +31,13 @@ class ModelConfig:
         Raises:
             ToolError: 缺少必要配置或服务地址无效。
         """
+        try:
+            max_output_tokens = int(os.getenv("SHIGUANG_MODEL_MAX_OUTPUT_TOKENS", "16384"))
+        except ValueError as exc:
+            raise ToolError("MODEL_CONFIG", "SHIGUANG_MODEL_MAX_OUTPUT_TOKENS must be an integer between 1024 and 65536") from exc
         config = cls(os.getenv("SHIGUANG_MODEL_PROVIDER", "deepseek").lower(),
                      os.getenv("SHIGUANG_MODEL_NAME", ""), os.getenv("SHIGUANG_MODEL_API_KEY", ""),
-                     os.getenv("SHIGUANG_MODEL_BASE_URL", ""))
+                     os.getenv("SHIGUANG_MODEL_BASE_URL", ""), max_output_tokens)
         config.validate()
         return config
 
@@ -46,6 +51,8 @@ class ModelConfig:
             raise ToolError("MODEL_CONFIG", "模型服务必须是 openai 或 deepseek")
         if not self.model.strip() or not self.api_key.strip():
             raise ToolError("MODEL_CONFIG", "请配置 SHIGUANG_MODEL_NAME 和 SHIGUANG_MODEL_API_KEY")
+        if type(self.max_output_tokens) is not int or not 1024 <= self.max_output_tokens <= 65536:
+            raise ToolError("MODEL_CONFIG", "SHIGUANG_MODEL_MAX_OUTPUT_TOKENS must be an integer between 1024 and 65536")
         url = urlparse(self.url)
         if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
             raise ToolError("MODEL_CONFIG", "模型地址必须是不含凭据、查询参数或片段的 HTTPS 地址")
@@ -97,11 +104,11 @@ class RemoteSession:
                                 else {"role": "tool", "tool_call_id": call_id, "content": payload})
         if openai:
             body = {"model": self.config.model, "input": self.history, "store": False,
-                    "include": ["reasoning.encrypted_content"], "max_output_tokens": 4096,
+                    "include": ["reasoning.encrypted_content"], "max_output_tokens": self.config.max_output_tokens,
                     "tools": [{"type": "function", **t, "strict": False} for t in tool_definitions()]}
             endpoint = "/responses"
         else:
-            body = {"model": self.config.model, "messages": self.history, "max_tokens": 4096,
+            body = {"model": self.config.model, "messages": self.history, "max_tokens": self.config.max_output_tokens,
                     "tools": [{"type": "function", "function": t} for t in tool_definitions()]}
             endpoint = "/chat/completions"
         try:
@@ -109,16 +116,18 @@ class RemoteSession:
             response.raise_for_status()
             data = response.json()
             if openai:
+                diagnostics = self.response_diagnostics(data, response, openai=True)
                 if data["status"] != "completed":
-                    raise ToolError("MODEL_INCOMPLETE", "模型回复未完成，草稿不会提交")
+                    self.raise_incomplete(diagnostics)
                 outputs = data["output"]
                 self.history.extend(outputs)
                 self.private_texts.extend(x.get("encrypted_content", "") for x in outputs if isinstance(x, dict))
                 calls = [ToolCall(x["call_id"], x["name"], x["arguments"]) for x in outputs if x["type"] == "function_call"]
             else:
                 choice = data["choices"][0]
+                diagnostics = self.response_diagnostics(data, response, openai=False)
                 if choice["finish_reason"] not in {"stop", "tool_calls"}:
-                    raise ToolError("MODEL_INCOMPLETE", "模型回复被截断，草稿不会提交")
+                    self.raise_incomplete(diagnostics)
                 message = choice["message"]
                 self.private_texts.extend([message.get("reasoning_content") or "", message.get("content") or ""])
                 # 保留思考模型继续工具调用所需的字段，但不写入日志或运行记录。
@@ -141,16 +150,35 @@ class RemoteSession:
                     details = {"服务商错误码": problem.get("code"), "服务商错误类型": problem.get("type"),
                                "服务商原因": problem.get("message"), "服务商参数": problem.get("param")}
             except (ValueError, AttributeError):
-                details = {"服务商原因": "响应不是标准 JSON 错误，未记录原始正文"}
+                details = {"服务商原因": "Non-JSON error response; raw body omitted."}
             self.log_failure("模型HTTP请求失败", exc, HTTP状态码=code,
                              服务商请求编号=exc.response.headers.get("x-request-id") or exc.response.headers.get("request-id"), **details)
-            raise ToolError("MODEL_HTTP_ERROR", f"模型服务返回 HTTP {code}，请检查配置或配额") from exc
+            provider_code = details.get("服务商错误码")
+            provider_type = details.get("服务商错误类型")
+            if provider_code in {"credit_balance_exhausted", "insufficient_quota"} or provider_type == "insufficient_quota":
+                reason = "API credits or quota exhausted. Add API credits or check the project's billing limits."
+            elif code == 401:
+                reason = "API authentication failed. Check the API key and ensure it belongs to the configured provider."
+            elif code == 403:
+                reason = "API access denied. Check account permissions and model access."
+            elif code == 429:
+                reason = "API rate limit exceeded. Wait before retrying or reduce request frequency."
+            else:
+                reason = "The model provider rejected the request."
+            provider_message = details.get("服务商原因")
+            if isinstance(provider_message, str) and provider_message:
+                reason += " " + provider_message[:1500]
+            summary = sanitize(f"{self.config.provider}: {reason} (upstream HTTP {code})", self.private_texts)
+            diagnostic = sanitize({"upstream_status": code, "provider_error_code": provider_code,
+                                   "provider_request_id": exc.response.headers.get("x-request-id") or exc.response.headers.get("request-id")},
+                                  self.private_texts)
+            raise ToolError("MODEL_HTTP_ERROR", summary, details=diagnostic) from exc
         except httpx.RequestError as exc:
             self.log_failure("模型网络请求失败", exc)
             raise ToolError("MODEL_NETWORK_ERROR", "无法连接模型服务") from exc
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             if isinstance(exc, ToolError):
-                self.log_failure("模型返回未完成结果", exc)
+                self.log_failure("模型返回未完成结果", exc, **exc.details)
                 raise
             # JSON 解码异常仅记录位置，原始响应正文不写入日志。
             if isinstance(exc, json.JSONDecodeError):
@@ -159,6 +187,65 @@ class RemoteSession:
             else:
                 self.log_failure("模型协议解析失败", exc)
             raise ToolError("MODEL_PROTOCOL_ERROR", "模型返回了无法解析的工具调用协议") from exc
+
+    def response_diagnostics(self, data, response, *, openai):
+        """仅提取完成原因和数字用量，不记录模型正文或推理内容。
+
+        Args:
+            data: 已解码的服务商响应。
+            response: HTTP 响应，用于获取请求编号。
+            openai: 是否使用 OpenAI Responses 协议。
+
+        Returns:
+            可安全写入日志及失败结果的诊断字段。
+        """
+        usage = data.get("usage") or {}
+        if not isinstance(usage, dict):
+            usage = {}
+        if openai:
+            incomplete = data.get("incomplete_details") or {}
+            reason = incomplete.get("reason", data.get("status")) if isinstance(incomplete, dict) else data.get("status")
+            output_details = usage.get("output_tokens_details") or {}
+        else:
+            reason = data["choices"][0].get("finish_reason")
+            output_details = usage.get("completion_tokens_details") or {}
+        details = {"finish_reason": str(reason)[:100], "max_output_tokens": self.config.max_output_tokens,
+                   "provider_request_id": response.headers.get("x-request-id") or response.headers.get("request-id")}
+        for target, source in (("input_tokens", "input_tokens" if openai else "prompt_tokens"),
+                               ("output_tokens", "output_tokens" if openai else "completion_tokens"),
+                               ("total_tokens", "total_tokens")):
+            if type(usage.get(source)) is int:
+                details[target] = usage[source]
+        if isinstance(output_details, dict) and type(output_details.get("reasoning_tokens")) is int:
+            details["reasoning_tokens"] = output_details["reasoning_tokens"]
+        details = sanitize(details, self.private_texts)
+        log_event("model_response_received", provider=self.config.provider, model=self.config.model, **details)
+        return details
+
+    def raise_incomplete(self, details):
+        """按真实结束原因解释未完成结果，不执行残缺工具调用。
+
+        Args:
+            details: 已脱敏的响应诊断字段。
+
+        Raises:
+            ToolError: 模型未正常完成，当前草稿不会提交。
+        """
+        reason = details["finish_reason"]
+        if reason in {"length", "max_output_tokens"}:
+            count = details.get("output_tokens")
+            reached = isinstance(count, int) and count >= self.config.max_output_tokens
+            message = (f"Model output reached the configured {self.config.max_output_tokens}-token limit. " if reached else
+                       f"Model generation hit a length limit (output budget: {self.config.max_output_tokens} tokens); "
+                       "the provider did not confirm whether output or context capacity was exhausted. ")
+            message += "Increase SHIGUANG_MODEL_MAX_OUTPUT_TOKENS or split the edit into smaller steps."
+        elif reason == "content_filter":
+            message = "The model provider filtered this response. This is not a context-length error."
+        elif reason in {"insufficient_system_resource", "aborted"}:
+            message = "The model provider interrupted generation. Retry the instruction later."
+        else:
+            message = f"Model response did not complete (finish_reason={reason})."
+        raise ToolError("MODEL_INCOMPLETE", message + " Draft was not committed.", details=details)
 
     def log_failure(self, event, error, **fields):
         """记录脱敏后的服务商错误和网络异常位置。

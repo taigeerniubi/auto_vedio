@@ -7,6 +7,7 @@ import logging
 from ..store import dumps
 from ..tools import ToolError, uid
 from ..observability import log_event, sanitize
+from ..http_status import error_status
 
 
 class RunRepository:
@@ -32,11 +33,16 @@ class RunRepository:
             ToolError: 运行不存在或不属于该项目。
         """
         with self.store.connect() as c:
-            row = c.execute("SELECT * FROM agent_runs WHERE id=? AND project_id=?", (rid, pid)).fetchone()
+            row = c.execute("""SELECT r.*, d.seq, d.base,
+                CASE WHEN r.status='running' AND d.status='open' AND d.seq>0 THEN d.snapshot END AS live_snapshot
+                FROM agent_runs r JOIN drafts d ON d.id=r.draft_id AND d.project_id=r.project_id
+                WHERE r.id=? AND r.project_id=?""", (rid, pid)).fetchone()
         if not row:
             raise ToolError("RUN_NOT_FOUND", "运行不存在或不属于该项目")
         return {"run_id": row["id"], "project_id": pid, "request_id": row["request_id"],
                 "draft_id": row["draft_id"], "status": row["status"],
+                "live_draft": {"seq": row["seq"], "base": row["base"], "snapshot": json.loads(row["live_snapshot"])}
+                    if row["live_snapshot"] else None,
                 "result": json.loads(row["result"]), "events": json.loads(row["events"])}
 
     def begin(self, pid, command):
@@ -73,7 +79,33 @@ class RunRepository:
                 rid, did, created = uid("run"), uid("draft"), True
                 c.execute("INSERT INTO drafts VALUES(?,?,?,0,?,'open')", (did, pid, project["head"], snapshot))
                 c.execute("INSERT INTO agent_runs VALUES(?,?,?,?,?,?,'running','{}','[]')", (rid, pid, command.request_id, digest, did, project["head"]))
+                # 指令仅保存在本机对话记录，不写诊断日志；与运行创建使用同一事务。
+                c.execute("INSERT INTO agent_run_inputs VALUES(?,?,?)", (rid, command.instruction, datetime.now(timezone.utc).isoformat()))
         return self.get(pid, rid), created
+
+    def conversation(self, pid, *, before=None, limit=50):
+        """分页读取工程对话，兼容旧版本未保存指令原文的运行。
+
+        Args:
+            pid: 所属工程编号。
+            before: 可选的上一页游标，不包含该条记录。
+            limit: 本次读取的最大条数。
+
+        Returns:
+            按时间正序排列的对话，以及读取更早记录的游标。
+        """
+        self.store.project(pid)
+        with self.store.connect() as c:
+            rows = c.execute("""SELECT r.*, r.rowid AS cursor, i.instruction, i.created_at
+                FROM agent_runs r LEFT JOIN agent_run_inputs i ON i.run_id=r.id
+                WHERE r.project_id=? AND (? IS NULL OR r.rowid<?)
+                ORDER BY r.rowid DESC LIMIT ?""", (pid, before, before, limit + 1)).fetchall()
+        page = rows[:limit]
+        items = [{"run_id": row["id"], "project_id": pid, "request_id": row["request_id"],
+                  "draft_id": row["draft_id"], "status": row["status"],
+                  "result": json.loads(row["result"]), "events": json.loads(row["events"]),
+                  "instruction": row["instruction"], "created_at": row["created_at"]} for row in reversed(page)]
+        return {"items": items, "next_cursor": page[-1]["cursor"] if len(rows) > limit else None}
 
     def by_request(self, pid, request_id):
         """用调用方提供的幂等编号定位运行。
@@ -109,6 +141,8 @@ class RunRepository:
             events.append(item)
             c.execute("UPDATE agent_runs SET events=? WHERE id=?", (dumps(events), rid))
         level = logging.WARNING if fields.get("错误代码") or fields.get("状态") == "失败" else logging.INFO
+        if fields.get("错误代码") and error_status(fields["错误代码"]) >= 500:
+            level = logging.ERROR
         log_event(event, logger="shiguang.agent", level=level, 运行编号=rid, **fields)
 
     def stop(self, pid, rid, status, result):

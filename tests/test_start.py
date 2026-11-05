@@ -40,7 +40,21 @@ def test_child_logs_redact_configured_key(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="shiguang.start"):
         launcher.log("服务输出", 内容="请求失败 private-test-secret")
     assert "private-test-secret" not in caplog.text
-    assert "已脱敏" in caplog.text
+    assert "REDACTED" in caplog.text
+
+
+def test_relay_keeps_flat_json_and_error_severity(monkeypatch, caplog):
+    """确保后端结构化错误不会再次嵌套或降级为 INFO。"""
+    import json
+    monkeypatch.setenv("SHIGUANG_MODEL_API_KEY", "private-test-secret")
+    with caplog.at_level(logging.INFO, logger="shiguang.start"):
+        launcher.relay_output("backend", json.dumps({"timestamp": "now", "level": "ERROR",
+            "event": "model_http_error", "reason": "private-test-secret rejected", "status_code": 429}))
+        launcher.relay_output("frontend", "Error: connect ECONNREFUSED 127.0.0.1:8000")
+    rows = [json.loads(record.message) for record in caplog.records]
+    assert all(record.levelno == logging.ERROR for record in caplog.records)
+    assert rows[0]["event"] == "model_http_error" and rows[0]["status_code"] == 429
+    assert "message" not in rows[0] and "private-test-secret" not in caplog.text
 
 
 def test_busy_port_fails_without_stopping_owner(monkeypatch):

@@ -6,6 +6,7 @@ from time import monotonic
 from pydantic import ValidationError
 
 from ..tools import ToolError
+from ..http_status import error_status
 from ..observability import log_context, log_event, validation_details
 from .contracts import Command, Limits
 from .prompts import TERMINALS, context, redact
@@ -105,6 +106,7 @@ class Agent:
                                 return self.runs.get(pid, rid)
                             return self.runs.stop(pid, rid, "needs_input" if call.name == "ask_user" else "unsupported", args.model_dump())
                         seq = self.store.draft(did)["seq"]
+                        self.runs.event(rid, "开始工具", 轮次=round_number, 工具=call.name)
                         result = self.store.call(did, call.name, arguments, f"{rid}-{calls_used}", seq, run_id=rid)
                     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
                         if isinstance(exc, ToolError):
@@ -123,6 +125,7 @@ class Agent:
                             unresolved.add(call.name)
                         errors += 1
                     self.runs.event(rid, "工具执行", 轮次=round_number, 工具=call.name,
+                                    changed_ids=result.get("changed_ids", []), draft_seq=result.get("draft_seq"),
                                     状态="成功" if result["ok"] else "失败", 错误代码=result.get("error_code"),
                                     原因=result.get("summary") if not result["ok"] else None, 参数错误=result.get("details"))
                     results.append((call.call_id, redact(result)))
@@ -130,9 +133,10 @@ class Agent:
                         raise ToolError("ERROR_LIMIT", "工具错误次数已达到预算")
             raise ToolError("ROUND_LIMIT", "已达到模型循环轮次预算")
         except ToolError as exc:
-            log_event("智能体执行异常", level=logging.WARNING, error=exc, 运行编号=rid, 项目编号=pid, 错误代码=exc.code,
+            log_event("智能体执行异常", level=logging.ERROR if error_status(exc.code) >= 500 else logging.WARNING,
+                      error=exc, 运行编号=rid, 项目编号=pid, 错误代码=exc.code,
                       secrets=(command.instruction,))
-            return self.runs.stop(pid, rid, "failed", {"error_code": exc.code, "summary": str(exc)})
+            return self.runs.stop(pid, rid, "failed", {"error_code": exc.code, "summary": str(exc), **exc.details})
         except Exception as exc:
             log_event("智能体未处理异常", level=logging.ERROR, error=exc, 运行编号=rid, 项目编号=pid,
                       错误代码="AGENT_INTERNAL_ERROR", secrets=(command.instruction,))

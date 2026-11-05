@@ -5,6 +5,7 @@ export class ApiError extends Error {
     public code = "",
     public requestId = "",
     public status = 0,
+    public payload?: unknown,
   ) {
     super(message);
   }
@@ -42,12 +43,14 @@ export async function api<T>(
   if (!response.ok || data.ok === false) {
     throw new ApiError(
       data.summary ||
+        data.result?.summary ||
         (typeof data.detail === "string"
           ? data.detail
           : "请求失败，请检查输入。"),
       data.error_code || "",
-      requestId,
+      requestId || data.request_id || "",
       response.status,
+      data,
     );
   }
   return data as T;
