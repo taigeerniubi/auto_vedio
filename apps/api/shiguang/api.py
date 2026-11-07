@@ -167,8 +167,9 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
 
     @app.get("/api/v1/projects/{pid}/assets")
     def list_assets(pid: str):
-        store.project(pid)
-        return [a.model_dump() for a in store.assets(pid).values()]
+        project = store.project(pid)
+        removed = project["snapshot"].get("removed_asset_ids", [])
+        return [a.model_dump() for a in store.assets(pid).values() if a.asset_id not in removed]
 
     @app.post("/api/v1/projects/{pid}/drafts")
     def draft(pid: str):

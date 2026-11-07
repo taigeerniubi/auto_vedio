@@ -168,13 +168,14 @@ class Store:
                     rows, total = timeline(s)
                     data = {"snapshot": s.model_dump(), "timeline": rows, "total_frames": total, "base_revision": row["base"], "capability_version": 1}
                 elif name == "list_assets":
-                    data = [a.model_dump() for a in assets.values()]
+                    data = [a.model_dump() for a in assets.values() if a.asset_id not in s.removed_asset_ids]
                 elif name == "list_presets":
                     data = presets()
                 elif name in {"search_segments", "get_asset_analysis"}:
                     from .analysis import analysis_records, search_segments
                     if name == "search_segments":
-                        data = search_segments(self, row["project_id"], args.query, c)
+                        data = [item for item in search_segments(self, row["project_id"], args.query, c)
+                                if item["asset_id"] not in s.removed_asset_ids]
                     else:
                         if args.asset_id not in assets:
                             return failure("ASSET_NOT_FOUND", "该工程中没有此素材")
@@ -198,6 +199,8 @@ class Store:
             if row["seq"] != expected_seq:
                 return failure("DRAFT_CONFLICT", "草稿已变更，请重新读取")
             try:
+                if name == "remove_asset" and (args.asset_id not in assets or args.asset_id in s.removed_asset_ids):
+                    return failure("ASSET_NOT_FOUND", "Asset is not available in this project.")
                 if name == "generate_subtitles":
                     from .analysis import analysis_records
                     changed, warnings = spec.handler(s, args, analysis_records(self, row["project_id"], c))

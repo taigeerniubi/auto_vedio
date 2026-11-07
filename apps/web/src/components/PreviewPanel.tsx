@@ -33,38 +33,46 @@ export function PreviewPanel({
   onError: (error: unknown) => void;
   motionDraft?: MotionDraft;
 }) {
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preparedPreview, setPreview] = useState<(Preview & { projectId: string }) | null>(null);
+  const preview = preparedPreview?.projectId === project?.project_id ? preparedPreview : null;
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [playerError, setPlayerError] = useState(false);
-  const prepared = useRef(new Map<string, Promise<Preview>>());
+  const prepared = useRef<{ key: string; promise: Promise<Preview> } | null>(null);
+  const previousProject = useRef<string | undefined>(undefined);
   const revision = project ? `${project.project_id}:${project.revision}` : "";
   useEffect(() => {
     let active = true;
-    setPreview(null);
     setFailed(false);
     setPlayerError(false);
-    setPlaying(false);
-    onFrame(0);
+    if (previousProject.current !== project?.project_id) {
+      setPreview(null);
+      setPlaying(false);
+      onFrame(0);
+      previousProject.current = project?.project_id;
+    }
     if (!project?.snapshot.clips.length) {
+      setPreview(null);
+      setPlaying(false);
+      onFrame(0);
       setLoading(false);
       return;
     }
     setLoading(true);
     const key = `${revision}:${retry}`;
-    let promise = prepared.current.get(key);
+    let promise = prepared.current?.key === key ? prepared.current.promise : null;
     if (!promise) {
       promise = post<Preview>(`${projectPath(project.project_id)}/preview`, {
         expected_revision: project.revision,
       });
-      prepared.current.set(key, promise);
+      prepared.current = { key, promise };
     }
     promise
       .then((result) => {
-        if (active) setPreview(result);
+        if (active) setPreview({ ...result, projectId: project.project_id });
       })
       .catch((error) => {
         if (active) {
@@ -82,6 +90,10 @@ export function PreviewPanel({
   useEffect(() => {
     const current = player.current;
     if (!current || !preview) return;
+    const nextFrame = Math.min(current.getCurrentFrame(), preview.plan.total_frames - 1);
+    if (nextFrame !== current.getCurrentFrame()) current.seekTo(nextFrame);
+    onFrame(nextFrame);
+    setPlaying(current.isPlaying());
     const update = ({ detail }: { detail: { frame: number } }) =>
       onFrame(detail.frame);
     const play = () => setPlaying(true);
@@ -96,7 +108,7 @@ export function PreviewPanel({
       current.removeEventListener("pause", pause);
       current.removeEventListener("ended", pause);
     };
-  }, [preview]);
+  }, [preview, retry]);
   const inputProps = useMemo(
     () =>
       preview
@@ -129,7 +141,7 @@ export function PreviewPanel({
       <div className={`preview-stage ${width < height ? "portrait" : ""}`}>
         {preview && inputProps ? (
           <Player
-            key={`${revision}-${retry}`}
+            key={`${project?.project_id}-${retry}`}
             ref={player}
             component={VlogComposition}
             inputProps={inputProps}
@@ -144,7 +156,7 @@ export function PreviewPanel({
             }}
             clickToPlay
             doubleClickToFullscreen
-            initialFrame={0}
+            initialFrame={Math.min(frame, preview.plan.total_frames - 1)}
             initiallyMuted={muted}
             showVolumeControls={false}
             errorFallback={({ error }) => {
@@ -204,7 +216,7 @@ export function PreviewPanel({
             className="play-toggle"
             icon={playing ? "pause" : "play"}
             aria-label={playing ? "暂停" : "播放"}
-            disabled={!preview || playerError}
+            disabled={!preview || playerError || loading || failed}
             onClick={() => player.current?.toggle()}
           />
           <Button
@@ -241,7 +253,9 @@ export function PreviewPanel({
           />
         </div>
       </div>
-      {playerError && (
+      {preview && loading && <div className="preview-warning" role="status">正在同步最新剪辑…</div>}
+      {preview && failed && <div className="preview-warning" role="alert">最新剪辑预览失败，当前画面为上一个版本。</div>}
+      {(playerError || (preview && failed)) && (
         <Button
           className="preview-retry"
           onClick={() => setRetry((v) => v + 1)}

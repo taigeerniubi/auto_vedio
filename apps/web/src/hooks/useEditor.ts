@@ -172,8 +172,8 @@ export function useEditor() {
    *   args: 工具参数。
    */
   async function edit(tool: string, args: unknown) {
-    if (!project) return;
-    await task("保存更改", async () => {
+    if (!project) return false;
+    return task("保存更改", async () => {
       const prefix = projectPath(project.project_id);
       const draft = await post<{ id: string; seq: number; base: number }>(
         `${prefix}/drafts`,

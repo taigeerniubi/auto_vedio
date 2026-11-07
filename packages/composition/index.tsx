@@ -35,7 +35,7 @@ function ClipView({clip, incoming}: {clip: PreparedClip; incoming: number}) {
     <div style={{position: 'absolute', left: width / 2, top: height / 2, transform: 'rotate(' + g.rotation + 'deg)'}}>
       {clip.kind === 'image' ? <Img src={mediaUrl(clip.file)} style={style}/> : clip.sourcePlayback ?
         <SourceFrame clip={clip} frame={frame} style={style}/> :
-        <OffthreadVideo src={mediaUrl(clip.file)} muted style={style}/>}
+        <OffthreadVideo src={mediaUrl(clip.file)} {...clip.previewPlayback} muted style={style}/>}
     </div>
   </AbsoluteFill>;
 }

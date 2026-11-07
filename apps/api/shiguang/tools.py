@@ -38,6 +38,10 @@ class ClipId(Model):
     clip_id: str
 
 
+class AssetId(Model):
+    asset_id: str
+
+
 class SequenceArgs(Model):
     clips: list[Clip] = Field(min_length=1, max_length=40)
 
@@ -242,6 +246,39 @@ def delete(s, a):
         x.ducks = [d for d in x.ducks if d.clip_id != c.clip_id]
     warnings = discard_invalid_transitions(s)
     return [c.clip_id], warnings
+
+
+@tool("remove_asset", AssetId, "从项目移除素材及其时间线引用，可撤销；保留磁盘原文件。")
+def remove_asset(s, a):
+    """删除素材引用并收短超出新时间线的包装，完整变更随快照撤销。
+
+    Args:
+        s: 当前隔离草稿。
+        a: 待移除的素材编号。
+
+    Returns:
+        变更编号和关联清理提示。
+    """
+    changed, warnings = [a.asset_id], []
+    for clip in list(s.clips):
+        if clip.asset_id == a.asset_id:
+            ids, notes = delete(s, ClipId(clip_id=clip.clip_id))
+            changed.extend(ids)
+            warnings.extend(notes)
+    s.audio_items = [item for item in s.audio_items if item.asset_id != a.asset_id]
+    total = timeline(s)[1]
+    for items in (s.text_items, s.audio_items):
+        items[:] = [item for item in items if item.anchor.kind != "timeline" or item.anchor.start_frame < total]
+        for item in items:
+            if item.anchor.kind == "timeline":
+                item.anchor.end_frame = min(item.anchor.end_frame, total)
+    for item in s.audio_items:
+        length = item.anchor.end_frame - item.anchor.start_frame
+        item.fade_in_frames = min(item.fade_in_frames, length)
+        item.fade_out_frames = min(item.fade_out_frames, length - item.fade_in_frames)
+    if a.asset_id not in s.removed_asset_ids:
+        s.removed_asset_ids.append(a.asset_id)
+    return changed, warnings
 
 
 @tool("move_clip", MoveArgs, "移动到指定片段之前；before_clip_id=null 表示末尾。")

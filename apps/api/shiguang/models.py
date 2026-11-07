@@ -126,6 +126,7 @@ class AudioItem(Model):
 
 class Snapshot(Model):
     schema_version: Literal[1] = 1
+    removed_asset_ids: list[str] = Field(default_factory=list)
     composition: Composition = Field(default_factory=Composition)
     clips: list[Clip] = Field(default_factory=list)
     transitions: list[Transition] = Field(default_factory=list)
@@ -196,6 +197,7 @@ def validate_snapshot(s: Snapshot, assets: dict[str, Asset]) -> list[str]:
         约束错误代码列表，空列表表示通过。
     """
     errors: list[str] = []
+    assets = {aid: asset for aid, asset in assets.items() if aid not in s.removed_asset_ids}
     ids = [c.clip_id for c in s.clips]
     if len(set(ids)) != len(ids):
         errors.append("DUPLICATE_CLIP_ID")

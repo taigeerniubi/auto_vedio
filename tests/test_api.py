@@ -6,7 +6,7 @@ from shiguang.api import create_app
 def test_local_api_and_project_isolation(tmp_path):
     client = TestClient(create_app(tmp_path / "api.sqlite3"))
     assert client.get("/health").json()["status"] == "ok"
-    assert len(client.get("/api/v1/tools").json()["tools"]) == 33
+    assert len(client.get("/api/v1/tools").json()["tools"]) == 34
     p = client.post("/api/v1/projects", json={"name": "trip"}).json()["project_id"]
     other = client.post("/api/v1/projects", json={"name": "other"}).json()["project_id"]
     draft = client.post(f"/api/v1/projects/{p}/drafts").json()["id"]

@@ -16,7 +16,7 @@ def initialize(context, clips=None):
 
 
 def test_all_tools_have_typed_schema():
-    assert len(TOOLS) == 33
+    assert len(TOOLS) == 34
     for tool in TOOLS.values():
         assert tool.arguments.model_json_schema()["additionalProperties"] is False
 

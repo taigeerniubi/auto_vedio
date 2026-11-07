@@ -173,7 +173,7 @@ def fit_audio(samples, n):
     return out
 
 
-def prepare_render(snapshot: Snapshot, assets: dict[str, Asset], public_dir: Path, tag: str):
+def prepare_render(snapshot: Snapshot, assets: dict[str, Asset], public_dir: Path, tag: str, *, audio_only=False):
     """生成渲染清单、派生视频和统一音频混音。
 
     Args:
@@ -181,6 +181,7 @@ def prepare_render(snapshot: Snapshot, assets: dict[str, Asset], public_dir: Pat
         assets: 可用素材映射。
         public_dir: 渲染器可读取的工作目录。
         tag: 用于隔离派生文件的标记。
+        audio_only: 仅准备混音，浏览器预览直接复用素材母版。
 
     Returns:
         包含混音文件名的渲染清单及处理警告。
@@ -201,7 +202,9 @@ def prepare_render(snapshot: Snapshot, assets: dict[str, Asset], public_dir: Pat
         contained(a.path, DATABASE)
         filename = f"{tag}-{clip.clip_id}." + ("png" if clip.kind == "image" else "mp4")
         dest = public_dir / filename
-        if clip.kind == "image":
+        if audio_only:
+            pass
+        elif clip.kind == "image":
             shutil.copyfile(a.path, dest)
         else:
             derive_video(clip, a, dest)

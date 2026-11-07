@@ -439,6 +439,9 @@ img {
   border-radius: 5px; background: #252c29; color: #d2ddcf; font-size: 16px;
 }
 .asset-add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.asset-card-actions { display: flex; flex-direction: column; gap: 5px; }
+.asset-remove svg { width: 14px; height: 14px; }
+.asset-remove:hover:not(:disabled) { color: #f4a6a6; border-color: #f4a6a6; }
 .audio-art {
   height: 100%;
   background: linear-gradient(140deg, #344d3b, #172724);

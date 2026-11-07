@@ -9,7 +9,8 @@ from fastapi.responses import FileResponse
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
-from .media import ARTIFACTS, DATABASE, contained, ffmpeg, import_media, prepare_render
+from .media import ARTIFACTS, DATABASE, contained, ffmpeg, import_media
+from .preview import prepare_preview
 from .models import Model, Snapshot
 from .tools import ToolError, uid
 
@@ -183,15 +184,7 @@ def workspace_router(store):
         project = store.project(pid)
         if project["revision"] != req.expected_revision:
             raise ToolError("REVISION_CONFLICT", "工程已变化，请刷新后预览")
-        token = uid("preview")
-        folder = contained(ARTIFACTS / "previews" / pid / token, ARTIFACTS / "previews")
-        plan, warnings = prepare_render(Snapshot.model_validate(project["snapshot"]), store.assets(pid), folder, token)
-        allowed = [clip["file"] for clip in plan["clips"]] + [plan["mix_file"]]
-        (folder / "allowed.json").write_text(json.dumps(allowed), encoding="utf-8")
-        prefix = f"/api/v1/projects/{pid}/previews/{token}/files/"
-        for clip in plan["clips"]:
-            clip["file"] = prefix + clip["file"]
-        plan["mix_file"] = prefix + plan["mix_file"]
+        plan, warnings = prepare_preview(pid, Snapshot.model_validate(project["snapshot"]), store.assets(pid))
         return {"revision": project["revision"], "plan": plan, "warnings": warnings}
 
     @router.get("/projects/{pid}/previews/{token}/files/{filename}")

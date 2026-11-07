@@ -1,7 +1,7 @@
 // 展示素材库并提供素材导入、文字、转场和调色操作。
 import { useEffect, useRef, useState } from "react";
 import { api, thumbnailUrl } from "../api";
-import type { LibraryFile, TextItem } from "../contracts";
+import type { Asset, LibraryFile, TextItem } from "../contracts";
 import type { Editor } from "../hooks/useEditor";
 import { duration, layout, timecode } from "../timeline";
 import { Button, Icon, Modal } from "./Ui";
@@ -30,6 +30,7 @@ export function AssetsPanel({
   const [loading, setLoading] = useState(false);
   const [checked, setChecked] = useState<string[]>([]);
   const [analysisAsset, setAnalysisAsset] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<Asset | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const snapshot = e.project?.snapshot;
   const clip = snapshot?.clips.find((c) => c.clip_id === e.selected);
@@ -192,15 +193,26 @@ export function AssetsPanel({
                     </button>
                   </div>
                 </div>
-                <button
-                  className="asset-add"
-                  title={`添加 ${asset.name} 到时间线`}
-                  aria-label={`添加素材 ${asset.name}`}
-                  disabled={disabled}
-                  onClick={() => void e.addAsset(asset)}
-                >
-                  +
-                </button>
+                <div className="asset-card-actions">
+                  <button
+                    className="asset-add"
+                    title={`添加 ${asset.name} 到时间线`}
+                    aria-label={`添加素材 ${asset.name}`}
+                    disabled={disabled}
+                    onClick={() => void e.addAsset(asset)}
+                  >
+                    +
+                  </button>
+                  <button
+                    className="asset-add asset-remove"
+                    title={`删除素材 ${asset.name}`}
+                    aria-label={`删除素材 ${asset.name}`}
+                    disabled={disabled}
+                    onClick={() => setRemoving(asset)}
+                  >
+                    <Icon name="trash" />
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -359,6 +371,21 @@ export function AssetsPanel({
             onClose={() => setAnalysisAsset(null)}
           />
         )}
+      {removing && (
+        <Modal title="删除项目素材" onClose={() => { if (!e.busy) setRemoving(null); }}>
+          <p>从项目删除「{removing.name}」？</p>
+          <p className="muted">
+            同时移除该素材在时间线上的片段、配乐及关联效果。可通过撤销恢复，磁盘原文件会保留。
+          </p>
+          {e.error && <p role="alert" className="failure-text">{e.error.message}</p>}
+          <footer>
+            <Button disabled={disabled} onClick={() => setRemoving(null)}>取消</Button>
+            <Button disabled={disabled} icon="trash" onClick={async () => {
+              if (await e.edit("remove_asset", { asset_id: removing.asset_id })) setRemoving(null);
+            }}>确认删除</Button>
+          </footer>
+        </Modal>
+      )}
       {showLibrary && (
         <Modal
           title="导入素材"
