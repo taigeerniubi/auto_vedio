@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import json
 import logging
 import os
+import re
 from urllib.parse import urlparse
 
 import httpx
@@ -10,7 +11,7 @@ import httpx
 from ..tools import ToolError
 from ..observability import log_event, sanitize
 from .contracts import ToolCall
-from .prompts import SYSTEM_PROMPT, tool_definitions
+from .prompts import SYSTEM_PROMPT, context_parts, tool_definitions
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,14 @@ class ModelConfig:
         """
         return (self.base_url or {"openai": "https://api.openai.com/v1", "deepseek": "https://api.deepseek.com"}.get(self.provider, "")).rstrip("/")
 
+    @property
+    def supports_cache_breakpoints(self) -> bool:
+        """官方 Responses 的 GPT-5.6 及后续版本支持显式前缀断点。"""
+        if self.provider != "openai" or self.url != "https://api.openai.com/v1":
+            return False
+        version = re.match(r"^gpt-(\d+)(?:\.(\d+))?(?:-|$)", self.model)
+        return version is not None and (int(version[1]), int(version[2] or 0)) >= (5, 6)
+
 
 class RemoteSession:
     def __init__(self, config: ModelConfig, context: dict, transport=None):
@@ -78,11 +87,24 @@ class RemoteSession:
         """
         config.validate()
         self.config = config
-        self.private_texts = [config.api_key, context.get("用户要求", ""), json.dumps(context, ensure_ascii=False)]
+        prefix, suffix = context_parts(context)
+        prompt_text = "\n".join(part for part in [*prefix, suffix] if part) or "{}"
+        content = prompt_text
+        if prefix and config.supports_cache_breakpoints:
+            # 为三段可复用内容保留断点，最新工具反馈仍可使用默认的隐式断点。
+            content = [{"type": "input_text", "text": part, "prompt_cache_breakpoint": {"mode": "explicit"}} for part in prefix]
+            if suffix:
+                content.append({"type": "input_text", "text": suffix})
+        self.private_texts = [config.api_key, context.get("用户要求", ""), prompt_text, *prefix, suffix]
+        definitions = tool_definitions()
+        if config.provider == "openai":
+            self.tools = [{"type": "function", **tool, "strict": False} for tool in definitions]
+        else:
+            self.tools = [{"type": "function", "function": tool} for tool in definitions]
         self.client = httpx.Client(headers={"Authorization": f"Bearer {config.api_key}"}, transport=transport,
                                    follow_redirects=False)
         self.history = [{"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
+                        {"role": "user", "content": content}]
 
     def step(self, results: list[tuple[str, dict]], timeout: float) -> list[ToolCall]:
         """发送一轮请求并解析工具调用，服务错误不会泄露响应正文。
@@ -105,11 +127,11 @@ class RemoteSession:
         if openai:
             body = {"model": self.config.model, "input": self.history, "store": False,
                     "include": ["reasoning.encrypted_content"], "max_output_tokens": self.config.max_output_tokens,
-                    "tools": [{"type": "function", **t, "strict": False} for t in tool_definitions()]}
+                    "tools": self.tools}
             endpoint = "/responses"
         else:
             body = {"model": self.config.model, "messages": self.history, "max_tokens": self.config.max_output_tokens,
-                    "tools": [{"type": "function", "function": t} for t in tool_definitions()]}
+                    "tools": self.tools}
             endpoint = "/chat/completions"
         try:
             response = self.client.post(self.config.url + endpoint, json=body, timeout=min(timeout, 60))
@@ -218,6 +240,17 @@ class RemoteSession:
                 details[target] = usage[source]
         if isinstance(output_details, dict) and type(output_details.get("reasoning_tokens")) is int:
             details["reasoning_tokens"] = output_details["reasoning_tokens"]
+        if openai:
+            input_details = usage.get("input_tokens_details")
+            cache_counts = input_details if isinstance(input_details, dict) else {}
+            cache_fields = (("cached_input_tokens", "cached_tokens"), ("cache_write_tokens", "cache_write_tokens"))
+        else:
+            cache_counts = usage
+            cache_fields = (("cached_input_tokens", "prompt_cache_hit_tokens"), ("cache_miss_tokens", "prompt_cache_miss_tokens"))
+        for target, source in cache_fields:
+            count = cache_counts.get(source)
+            if type(count) is int and count >= 0:
+                details[target] = count
         details = sanitize(details, self.private_texts)
         log_event("model_response_received", provider=self.config.provider, model=self.config.model, **details)
         return details

@@ -1,4 +1,7 @@
 """构建智能体的中文行为约束、工具声明和脱敏工程上下文。"""
+import json
+
+from ..store import dumps
 from ..tools import definitions, presets
 from .contracts import AskUser, Finish, Unsupported
 
@@ -37,7 +40,35 @@ def tool_definitions() -> list[dict]:
     """
     items = [{k: d[k] for k in ("name", "description", "parameters")} for d in definitions()]
     descriptions = {"finish": "完成编辑并请求控制器校验提交", "ask_user": "请求用户澄清并放弃本次草稿", "unsupported": "说明当前能力无法完成并放弃本次草稿"}
-    return items + [{"name": name, "description": descriptions[name], "parameters": model.model_json_schema()} for name, model in TERMINALS.items()]
+    items.extend({"name": name, "description": descriptions[name], "parameters": model.model_json_schema()} for name, model in TERMINALS.items())
+    return sorted(items, key=lambda item: item["name"])
+
+
+def context_parts(context: dict) -> tuple[list[str], str]:
+    """按更新频率组织模型输入，供两种协议共用。
+
+    Args:
+        context: 脱敏后的工程上下文。
+
+    Returns:
+        可跨指令复用的前缀块，以及含近期对话、编辑器状态和当前要求的后缀。
+    """
+    remaining = context.copy()
+    prefix = []
+    for fields in (("预设", "分析能力"), ("素材", "素材分析"), ("工程", "基础版本")):
+        lines = [dumps({key: remaining.pop(key)}) for key in fields if key in remaining]
+        if lines:
+            prefix.append("\n".join(lines))
+    # 另行传入的上下文字段也保留；只规范化映射键，时间线和对话等列表保留原顺序。
+    query = remaining.pop("用户要求", None)
+    suffix = []
+    if "近期对话" in remaining:
+        suffix.append(dumps({"近期对话": remaining.pop("近期对话")}))
+    if remaining:
+        suffix.append(dumps(remaining))
+    if query is not None:
+        suffix.append(dumps({"用户要求": query}))
+    return prefix, "\n".join(suffix)
 
 
 def redact(value):
@@ -71,12 +102,12 @@ def context(store, draft, command) -> dict:
     from ..perception_provider import perception_status
     with store.connect() as con:
         history = con.execute("SELECT i.instruction,r.result FROM agent_run_inputs i JOIN agent_runs r ON r.id=i.run_id WHERE r.project_id=? AND r.status='completed' ORDER BY i.rowid DESC LIMIT 3", (draft["project_id"],)).fetchall()
-    import json
     records = analysis_records(store, draft["project_id"])
-    summaries = [{"asset_id": aid, "stages": r["stages"], "segments": [{"start_frame": s["start_frame"], "end_frame": s["end_frame"], "description": (s.get("visual") or {}).get("description", "")[:240], "tags": (s.get("visual") or {}).get("tags", [])[:10]} for s in r["segments"][:24]], "speech": r["speech"]["presence"]} for aid, r in records.items()]
+    summaries = [{"asset_id": aid, "stages": r["stages"], "segments": [{"start_frame": s["start_frame"], "end_frame": s["end_frame"], "description": (s.get("visual") or {}).get("description", "")[:240], "tags": (s.get("visual") or {}).get("tags", [])[:10]} for s in r["segments"][:24]], "speech": r["speech"]["presence"]} for aid, r in sorted(records.items())]
+    assets = store.assets(draft["project_id"])
     return redact({"用户要求": command.instruction, "选中片段": command.selected_clip_ids, "播放帧": command.playhead_frame,
                    "近期对话": [{"指令": row[0][:1000], "结果": json.loads(row[1]).get("summary", "")[:1000]} for row in reversed(history)],
                    "分析能力": perception_status(), "素材分析": summaries,
                    "工程": draft["snapshot"], "基础版本": draft["base"],
-                   "素材": [a.model_dump() for a in store.assets(draft["project_id"]).values()],
+                   "素材": [assets[aid].model_dump() for aid in sorted(assets)],
                    "预设": presets()})

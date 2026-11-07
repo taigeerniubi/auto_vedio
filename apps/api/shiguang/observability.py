@@ -17,7 +17,8 @@ _FILES = {}
 _LOCK = RLock()
 LOGGER = logging.getLogger("shiguang")
 LOGGER.setLevel(logging.INFO)
-TOKEN_COUNT_FIELDS = {"max_output_tokens", "input_tokens", "output_tokens", "reasoning_tokens", "total_tokens"}
+TOKEN_COUNT_FIELDS = {"max_output_tokens", "input_tokens", "output_tokens", "reasoning_tokens", "total_tokens",
+                      "cached_input_tokens", "cache_write_tokens", "cache_miss_tokens"}
 if not LOGGER.handlers:
     console = logging.StreamHandler()
     if os.getenv("SHIGUANG_LOG_CONSOLE") != "json":
