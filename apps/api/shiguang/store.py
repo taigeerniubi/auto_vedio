@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 import sqlite3
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -15,6 +16,9 @@ from .tools import TOOLS, ToolError, presets, uid
 from .observability import log_event, validation_details
 from .savepoints import latest_savepoint
 from . import editing_features  # 注册需要工程上下文的扩展工具。
+
+if TYPE_CHECKING:
+    from .analysis import AnalysisService
 
 
 def dumps(value):
@@ -25,6 +29,8 @@ class Store:
     def __init__(self, db: Path):
         db.parent.mkdir(parents=True, exist_ok=True)
         self.db = db
+        # API 装配时注入共享服务；独立使用 Store 时仍可按需创建。
+        self.analysis_service: AnalysisService | None = None
         with self.connect() as con:
             con.executescript("""
                 CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY, name TEXT, head INTEGER NOT NULL, undo TEXT NOT NULL, redo TEXT NOT NULL);
@@ -200,7 +206,7 @@ class Store:
                 self.check_run_owner(con, did, run_id)
             if draft["status"] != "open":
                 raise ToolError("DRAFT_CLOSED", "草稿已关闭")
-            service = getattr(self, "analysis_service", None) or AnalysisService(self)
+            service = self.analysis_service or AnalysisService(self)
             try:
                 if name == "query_audio":
                     data = service.query_audio(draft["project_id"], args.asset_id, args)
