@@ -4,10 +4,51 @@ import json
 import httpx
 import pytest
 
-from shiguang.agent.contracts import Command
+from shiguang.agent.contracts import Command, Limits
 from shiguang.agent.prompts import context as build_context
 from shiguang.agent.providers import ModelConfig, RemoteSession
+from shiguang.perception_provider import PerceptionConfig, PerceptionProvider
 from shiguang.tools import ToolError
+
+
+@pytest.mark.parametrize("provider", ["openai", "deepseek"])
+@pytest.mark.parametrize("visible", [True, False])
+def test_finish_preserves_public_answer_and_never_exposes_reasoning(provider, visible):
+    """公开答复与 finish 同时返回时展示实际答案，内部思考不能代替缺失答复。"""
+    answer = "可以裁切配乐、调整音量和淡入淡出。\n\n这段前奏约 15 秒较轻，可以考虑从主节奏开始。"
+    summary = "确认了配乐结构，并说明了修改方法。"
+    args = json.dumps({"summary": summary}, ensure_ascii=False)
+    if provider == "openai":
+        data = {"status": "completed", "output": [
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": "private-reasoning-marker"}],
+             "encrypted_content": "private-encrypted-marker"},
+            {"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": answer if visible else ""}]},
+            {"type": "function_call", "call_id": "finish-public", "name": "finish", "arguments": args},
+        ]}
+    else:
+        data = {"choices": [{"finish_reason": "tool_calls", "message": {
+            "role": "assistant", "content": answer if visible else "", "reasoning_content": "private-reasoning-marker",
+            "tool_calls": [{"id": "finish-public", "type": "function", "function": {"name": "finish", "arguments": args}}],
+        }}]}
+    session = RemoteSession(ModelConfig(provider, "answer-test", "fake-key"), {},
+                            httpx.MockTransport(lambda _: httpx.Response(200, json=data)))
+    try:
+        calls = session.step([], 5)
+        assert len(calls) == 1 and calls[0].name == "finish" and calls[0].call_id == "finish-public"
+        assert json.loads(calls[0].arguments)["summary"] == (answer if visible else summary)
+        assert "private-" not in calls[0].arguments
+    finally:
+        session.close()
+
+
+def test_public_reply_does_not_rewrite_invalid_finish_or_nonterminal_calls():
+    """答复保留不能绕过混合结束调用、无效参数或其他工具的控制器检查。"""
+    from shiguang.agent.contracts import ToolCall
+    finish = ToolCall("finish-1", "finish", '{"summary":"已完成"}')
+    tool = ToolCall("tool-1", "list_assets", "{}")
+    for calls in [[tool], [finish, tool], [ToolCall("bad-finish", "finish", "{}")]]:
+        assert RemoteSession._preserve_visible_reply(calls, "完整公开答复") == calls
 
 
 @pytest.mark.parametrize("provider", ["openai", "deepseek"])
@@ -31,7 +72,7 @@ def test_protocol_round_trip_preserves_reasoning_and_tool_results(provider):
         assert first[0].name == "list_assets"
         session.step([("call-1", {"ok": True, "data": []})], 5)
         tools = sent[0]["tools"]
-        assert len(tools) == 37
+        assert len(tools) == 40
         history_key = "input" if provider == "openai" else "messages"
         first_history = sent[0][history_key]
         assert sent[1][history_key][:len(first_history)] == first_history
@@ -232,3 +273,151 @@ def test_invalid_output_budget_is_rejected(monkeypatch, value):
     monkeypatch.setenv("SHIGUANG_MODEL_MAX_OUTPUT_TOKENS", value)
     with pytest.raises(ToolError, match="MAX_OUTPUT_TOKENS"):
         ModelConfig.from_env()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "network", "rate", "unavailable"])
+def test_retry_reuses_request_body_and_keeps_tool_feedback_once(failure):
+    """临时错误仅重发本轮请求，历史和工具反馈不会重复追加。"""
+    sent, timeouts = [], []
+    def handle(request):
+        sent.append(json.loads(request.content))
+        timeouts.append(request.extensions["timeout"]["read"])
+        if len(sent) == 1:
+            if failure == "timeout":
+                raise httpx.ReadTimeout("temporary", request=request)
+            if failure == "network":
+                raise httpx.ConnectError("temporary", request=request)
+            return httpx.Response(429 if failure == "rate" else 503, json={"error": {"code": "temporary"}})
+        return httpx.Response(200, json={"choices": [{"finish_reason": "tool_calls", "message": {
+            "role": "assistant", "tool_calls": [{"id": "next", "function": {"name": "finish", "arguments": "{}"}}]}}]})
+    session = RemoteSession(ModelConfig("deepseek", "test", "secret-key"), {}, httpx.MockTransport(handle), wait=lambda _: None)
+    try:
+        assert session.step([("previous", {"ok": True})], None)[0].call_id == "next"
+        assert sent[0] == sent[1]
+        assert timeouts == [120, 120]
+        assert len([m for m in session.history if m.get("tool_call_id") == "previous"]) == 1
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("code,error", [(401, {}), (403, {}), (400, {}),
+    (429, {"code": "insufficient_quota"}), (429, {"code": "credit_balance_exhausted"})])
+def test_permanent_errors_are_not_retried(code, error):
+    """鉴权、参数和余额错误不可通过重复付费请求恢复。"""
+    sent = []
+    def handle(request):
+        sent.append(request)
+        return httpx.Response(code, json={"error": error})
+    session = RemoteSession(ModelConfig("deepseek", "test", "key"), {}, httpx.MockTransport(handle))
+    try:
+        with pytest.raises(ToolError) as failure:
+            session.step([], None)
+        assert failure.value.code == "MODEL_HTTP_ERROR"
+        assert len(sent) == 1
+    finally:
+        session.close()
+
+
+def test_budget_expiry_is_time_limit_and_prevents_retry():
+    """总预算耗尽时给出准确错误码，不再进行无意义重试。"""
+    now = [10.0]
+    sent = []
+    def handle(request):
+        sent.append(request)
+        assert request.extensions["timeout"]["read"] == 2
+        now[0] += 2
+        raise httpx.ReadTimeout("timed out", request=request)
+    session = RemoteSession(ModelConfig("deepseek", "test", "key"), {}, httpx.MockTransport(handle), clock=lambda: now[0])
+    try:
+        with pytest.raises(ToolError) as failure:
+            session.step([], 2)
+        assert failure.value.code == "TIME_LIMIT"
+        assert len(sent) == 1
+    finally:
+        session.close()
+
+
+def test_cancellation_during_retry_backoff_stops_new_request():
+    """退避期间可以取消，下一次网络请求不会发出。"""
+    sent, cancelled = [], [False]
+    def handle(request):
+        sent.append(request)
+        return httpx.Response(503)
+    def check():
+        if cancelled[0]:
+            raise ToolError("RUN_STOPPED", "cancelled")
+    session = RemoteSession(ModelConfig("deepseek", "test", "key"), {}, httpx.MockTransport(handle),
+                            wait=lambda _: cancelled.__setitem__(0, True))
+    session.check_active = check
+    try:
+        with pytest.raises(ToolError) as failure:
+            session.step([], None)
+        assert failure.value.code == "RUN_STOPPED" and len(sent) == 1
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("provider", ["openai", "deepseek"])
+def test_saved_protocol_context_restores_without_credentials(provider):
+    """恢复工具调用和供应商状态，检查点不包含模型配置密钥。"""
+    first = RemoteSession(ModelConfig(provider, "test", "private-key"), {"用户要求": "继续原来的任务"})
+    restored = RemoteSession(ModelConfig(provider, "test", "new-private-key"), {})
+    try:
+        first.history.append({"role": "assistant", "content": "checkpoint-response"})
+        checkpoint = first.export_state()
+        assert "private-key" not in json.dumps(checkpoint)
+        restored.restore_state(checkpoint)
+        assert restored.history == first.history
+        checkpoint["history"].clear()
+        assert restored.history
+        with pytest.raises(ToolError, match="模型配置已变更"):
+            restored.restore_state({**first.export_state(), "model": "other"})
+    finally:
+        first.close()
+        restored.close()
+
+
+def test_runtime_budget_can_be_disabled_or_configured(monkeypatch):
+    """默认不再用三分钟切断任务，用户可以显式启用总预算。"""
+    monkeypatch.delenv("SHIGUANG_AGENT_TIMEOUT_SECONDS", raising=False)
+    assert Limits.from_env().seconds is None
+    monkeypatch.setenv("SHIGUANG_AGENT_TIMEOUT_SECONDS", "600")
+    assert Limits.from_env().seconds == 600
+    for bad in ["-1", "nan", "inf", "no"]:
+        monkeypatch.setenv("SHIGUANG_AGENT_TIMEOUT_SECONDS", bad)
+        with pytest.raises(ValueError):
+            Limits.from_env()
+
+
+def test_request_policy_env_validation(monkeypatch):
+    """网络等待和重试次数可配置，但必须有限且有效。"""
+    monkeypatch.setenv("SHIGUANG_MODEL_API_KEY", "key")
+    monkeypatch.setenv("SHIGUANG_MODEL_NAME", "test")
+    monkeypatch.setenv("SHIGUANG_MODEL_TIMEOUT_SECONDS", "180")
+    monkeypatch.setenv("SHIGUANG_MODEL_RETRIES", "2")
+    config = ModelConfig.from_env()
+    assert config.request_timeout_seconds == 180 and config.retries == 2
+    for name, bad in [("SHIGUANG_MODEL_TIMEOUT_SECONDS", "nan"), ("SHIGUANG_MODEL_TIMEOUT_SECONDS", "0"),
+                      ("SHIGUANG_MODEL_RETRIES", "4"), ("SHIGUANG_MODEL_RETRIES", "-1")]:
+        with monkeypatch.context() as settings:
+            settings.setenv(name, bad)
+            with pytest.raises(ToolError):
+                ModelConfig.from_env()
+
+
+def test_perception_timeout_is_configurable_and_validated(monkeypatch):
+    """长音频等待采用独立可配置值，拒绝无效或无限网络等待。"""
+    monkeypatch.setenv("SHIGUANG_AUDIO_API_KEY", "key")
+    monkeypatch.setenv("SHIGUANG_PERCEPTION_TIMEOUT_SECONDS", "240")
+    config = PerceptionConfig.from_env("audio")
+    seen = []
+    def handle(request):
+        seen.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"ok": True})
+    provider = PerceptionProvider(config, httpx.MockTransport(handle))
+    assert provider.request("/chat/completions", json={}) == {"ok": True}
+    assert seen == [240]
+    for bad in ["0", "-1", "inf", "nan", "invalid"]:
+        monkeypatch.setenv("SHIGUANG_PERCEPTION_TIMEOUT_SECONDS", bad)
+        with pytest.raises(ToolError, match="SHIGUANG_PERCEPTION_TIMEOUT_SECONDS"):
+            PerceptionConfig.from_env("audio")

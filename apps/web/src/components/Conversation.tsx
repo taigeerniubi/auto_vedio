@@ -1,12 +1,13 @@
-// 展示按工程持久化的历史对话、当前运行及可展开的编辑结果。
+// 展示按工程持久化的历史对话、当前运行及编辑结果。
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "../hooks/useEditor";
 import type { Run, ConversationEntry } from "../contracts";
 import { Button, Icon } from "./Ui";
 import { progressLabel } from "../runProgress";
+import { ReplyContent } from "./ReplyContent";
 
 const states = {
-  running: "正在剪辑",
+  running: "正在处理",
   completed: "编辑完成",
   failed: "本次未完成",
   cancelled: "已取消",
@@ -81,7 +82,7 @@ export function Conversation({ editor: e, onSuggest }: { editor: Editor; onSugge
           </div>
         </div>
       )}
-      {entries.map((entry, index) => (
+      {entries.map((entry) => (
         <div
           className="conversation-turn"
           key={entry.run_id}
@@ -98,7 +99,6 @@ export function Conversation({ editor: e, onSuggest }: { editor: Editor; onSugge
             run={entry}
             editor={e}
             active={entry.status === "running"}
-            latest={!pending && index === entries.length - 1}
           />
         </div>
       ))}
@@ -108,19 +108,18 @@ export function Conversation({ editor: e, onSuggest }: { editor: Editor; onSugge
             <small>你</small>
             <p>{e.instruction}</p>
           </div>
-          <RunMessage run={null} editor={e} active={active} latest />
+          <RunMessage run={null} editor={e} active={active} />
         </div>
       )}
     </div>
   );
 }
 
-/** 展示一次运行的进度、原因和可查看的编辑差异。
+/** 展示一次运行的进度、原因和编辑结果。
  * Args:
  *   run: 已建立的运行，提交期间可为空。
  *   editor: 编辑器操作接口。
  *   active: 是否仍在执行。
- *   latest: 是否为最新一条对话。
  * Returns:
  *   对应运行的助手消息。
  */
@@ -128,15 +127,20 @@ function RunMessage({
   run,
   editor: e,
   active,
-  latest,
 }: {
   run: Run | null;
   editor: Editor;
   active: boolean;
-  latest: boolean;
 }) {
-  const [showDiff, setShowDiff] = useState(false);
   const result = run?.result;
+  const [expandedRun, setExpandedRun] = useState<string | null>(null);
+  const showAll = !!run && expandedRun === run.run_id;
+  const steps = run?.events.filter((event, i) => event.事件 === "工具执行" || event.事件 === "请求模型" ||
+    event.事件 === "重试模型" || event.事件 === "恢复任务" ||
+    (event.事件 === "开始工具" && active && i === run.events.length - 1)) || [];
+  const hiddenCount = Math.max(0, steps.length - 7);
+  const visibleSteps = showAll ? steps : steps.slice(-7);
+  const resumed = run?.events.some(event => event.事件 === "恢复任务");
   return (
     <div className="agent-message">
       <div className="row">
@@ -145,13 +149,23 @@ function RunMessage({
         </span>
         <strong>拾光</strong>
         <small title={run ? `运行编号：${run.run_id}` : undefined}>
-          {run ? states[run.status] : active ? "开始处理…" : "本次未完成"}
+          {run ? run.status === "completed" && result?.changed === false ? "回复完成" : states[run.status]
+            : active ? "开始处理…" : "本次未完成"}
         </small>
       </div>
+      {resumed && <p className="execution-resumed">从上次中断处继续</p>}
       {run?.events.length ? (
-        <div className="execution-list">
-          {run.events.filter((event, i) => event.事件 === "工具执行" || event.事件 === "请求模型" ||
-            (event.事件 === "开始工具" && active && i === run.events.length - 1)).slice(-7).map((event, index) => {
+        <details className="execution-details" open={active || run.status === "failed"}>
+          <summary>{active ? "正在处理" : "处理过程"}</summary>
+          {hiddenCount > 0 && <div className="execution-history-control">
+            <span>{showAll ? `共 ${steps.length} 条记录` : `仅显示最近 7 条，前 ${hiddenCount} 条已收起`}</span>
+            <Button tone="ghost" aria-expanded={showAll} aria-controls={`execution-${run.run_id}`}
+              onClick={() => setExpandedRun(showAll ? null : run.run_id)}>
+              {showAll ? "收起早期步骤" : "展开完整过程"}
+            </Button>
+          </div>}
+          <div className="execution-list" id={`execution-${run.run_id}`}>
+          {visibleSteps.map((event, index) => {
             const working = active && event === run.events.at(-1) && event.事件 !== "工具执行";
             return <div key={index} className={working ? "working-step" : ""}>
               <span className={event.状态 === "失败" ? "failed-dot" : "step-indicator"}>
@@ -161,58 +175,27 @@ function RunMessage({
               {working && <small>进行中</small>}
             </div>;
           })}
-        </div>
+          </div>
+        </details>
       ) : (
         active && <p className="muted">正在读取工程与素材…</p>
       )}
       {!run && !active && e.error && (
         <p className="failure-text">{e.error.message}</p>
       )}
-      {result && (
-        <p className={run?.status === "failed" ? "failure-text" : ""}>
-          {result.question || result.reason || result.summary}
-        </p>
-      )}
+      {result && <ReplyContent text={result.question || result.reason || result.summary || ""}
+        failed={run?.status === "failed"} />}
       {!!result?.error_code && (
         <small className="error-code">{result.error_code}</small>
       )}
       {run?.status === "failed" && <small className="run-id">运行编号：{run.run_id}</small>}
+      {run?.status === "failed" && <Button
+        disabled={!!e.busy || !e.conversation.ready || !e.model?.configured}
+        onClick={() => void e.command("继续上次任务", undefined, run.run_id)}
+        title="恢复保存的草稿和任务上下文；工程版本改变时会提示冲突"
+      >继续任务</Button>}
       {run?.status === "needs_input" && (
         <small>结合上面的要求补充说明，再次发送完整指令。</small>
-      )}
-      {run?.status === "completed" && (
-        <div className="row result-actions">
-          <Button
-            disabled={
-              !!e.busy || !latest || run.result.changed === false || run.result.revision !== e.project?.revision
-            }
-            onClick={() => void e.history("undo")}
-          >
-            撤销更改
-          </Button>
-          <Button tone="ghost" onClick={() => setShowDiff(!showDiff)}>
-            查看修改
-          </Button>
-        </div>
-      )}
-      {showDiff && result?.diff && (
-        <div className="diff-summary">
-          {Object.keys(result.diff).length
-            ? Object.keys(result.diff).map((key) => (
-                <div key={key}>
-                  ✓　
-                  {{
-                    clips: "画面片段",
-                    text_items: "标题文字",
-                    audio_items: "配乐",
-                    transitions: "转场",
-                    composition: "画布设置",
-                  }[key] || key}
-                  已更新
-                </div>
-              ))
-            : "本次没有修改工程。"}
-        </div>
       )}
     </div>
   );

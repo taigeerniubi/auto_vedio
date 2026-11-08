@@ -4,6 +4,8 @@ import type {
   Transform,
   Plan,
 } from "../../../packages/composition/math";
+import type { TimelineTransition } from "../../../packages/composition/transitionPresets";
+import type {ColorGrade} from "../../../packages/composition/color";
 
 export type Asset = {
   asset_id: string;
@@ -28,7 +30,9 @@ export type Clip = {
   original_audio_gain_db: number;
   transform: Transform;
   motion: (Motion & { preset_version: number }) | null;
-  color_preset: "warm" | "cool" | "monochrome" | null;
+  color_preset: string | null;
+  color_preset_intensity?: number;
+  color_grade?: ColorGrade;
 };
 export type Anchor = {
   kind: "timeline" | "clip";
@@ -60,21 +64,34 @@ export type Snapshot = {
   schema_version: number;
   composition: { width: number; height: number; fps: number };
   clips: Clip[];
-  transitions: {
-    left_clip_id: string;
-    right_clip_id: string;
-    duration_frames: number;
-  }[];
+  transitions: TimelineTransition[];
   text_items: TextItem[];
   audio_items: AudioItem[];
+  cover?: Cover | null;
 };
+export type Cover = {
+  source: "timeline" | "image"; frame: number; asset_id: string | null;
+  title: string; x: number; y: number; font_size: number; color: string; shade: number;
+  fit: 'cover' | 'contain';
+};
+export type Savepoint = { savepoint_id: string; revision: number; created_at: string };
 export type ProjectInfo = {
   project_id: string;
   name: string;
   revision: number;
+  last_savepoint?: Savepoint | null;
 };
 export type Project = ProjectInfo & { snapshot: Snapshot };
-export type LibraryFile = { name: string; path: string; size: number };
+export type LibraryFile = {
+  asset_id: string;
+  project_id: string;
+  name: string;
+  kind: "video" | "image" | "audio";
+  size: number;
+  width: number;
+  height: number;
+  total_frames: number;
+};
 export type ModelStatus = {
   configured: boolean;
   provider: string;
@@ -84,6 +101,7 @@ export type Run = {
   live_draft?: { base: number; seq: number; snapshot: Snapshot } | null;
   run_id: string;
   project_id: string;
+  session_id?: string;
   status:
     | "running"
     | "completed"
@@ -104,6 +122,9 @@ export type Run = {
     事件: string;
     轮次?: number;
     工具?: string;
+    asset_id?: string;
+    asset_name?: string;
+    cache_hit?: boolean;
     状态?: string;
     原因?: string;
     changed_ids?: string[];
@@ -119,11 +140,45 @@ export type ConversationPage = {
   items: ConversationEntry[];
   next_cursor: number | null;
 };
+export type ChatSession = {
+  session_id: string;
+  project_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  has_messages: boolean;
+  running: boolean;
+};
 export type ExportResult = {
   revision: number;
   frames: number;
   download_url: string;
   warnings: string[];
+  width: number;
+  height: number;
+  fps: number;
+  bytes: number;
+  filename: string;
+};
+export type ExportOptions = {
+  resolution: "source" | "720p" | "1080p" | "2160p";
+  quality: "standard" | "high" | "compact";
+  filename: string;
+};
+export type ExportJob = {
+  export_id: string;
+  project_id: string;
+  revision: number;
+  status: "queued" | "running" | "completed" | "failed";
+  stage: string;
+  progress: number;
+  rendered_frames: number;
+  total_frames: number;
+  created_at: string;
+  updated_at: string;
+  options: ExportOptions;
+  result: ExportResult | null;
+  error: { code: string; message: string } | null;
 };
 
 export type PerceptionStatus = Record<

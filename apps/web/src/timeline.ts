@@ -1,5 +1,5 @@
 // 计算浏览器时间线的位置、片段时长和帧时间码。
-import type { Clip, Snapshot, Anchor } from "./contracts";
+import type { Clip, Snapshot, Anchor, AudioItem } from "./contracts";
 
 /** 计算片段经变速后的输出帧数。
  * Args:
@@ -64,4 +64,24 @@ export function anchorRange(anchor: Anchor, snapshot: Snapshot) {
           ?.start || 0
       : 0;
   return [offset + anchor.start_frame, offset + anchor.end_frame];
+}
+
+/** 按音轨和时间区间分行，确保重叠配乐不会遮住彼此。
+ * Args:
+ *   snapshot: 当前工程；缺省时显示一条空配乐行。
+ * Returns:
+ *   各可视行及其带绝对时间位置的音频。
+ */
+export function audioLanes(snapshot?: Snapshot) {
+  const lanes: { track: number; items: { item: AudioItem; start: number; end: number }[] }[] = [];
+  const entries = (snapshot?.audio_items || []).map(item => {
+    const [start, end] = anchorRange(item.anchor, snapshot!);
+    return { item, start, end };
+  }).sort((a, b) => a.item.track - b.item.track || a.start - b.start);
+  for (const entry of entries) {
+    const lane = lanes.find(row => row.track === entry.item.track && row.items.at(-1)!.end <= entry.start);
+    if (lane) lane.items.push(entry);
+    else lanes.push({ track: entry.item.track, items: [entry] });
+  }
+  return lanes.length ? lanes : [{ track: 1, items: [] }];
 }

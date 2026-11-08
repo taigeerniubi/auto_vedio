@@ -40,15 +40,15 @@ export async function api<T>(
       response.status,
     );
   }
-  if (!response.ok || data.ok === false) {
+  if (!response.ok || data?.ok === false) {
     throw new ApiError(
-      data.summary ||
-        data.result?.summary ||
-        (typeof data.detail === "string"
+      data?.summary ||
+        data?.result?.summary ||
+        (typeof data?.detail === "string"
           ? data.detail
           : "请求失败，请检查输入。"),
-      data.error_code || "",
-      requestId || data.request_id || "",
+      data?.error_code || "",
+      requestId || data?.request_id || "",
       response.status,
       data,
     );

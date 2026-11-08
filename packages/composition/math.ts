@@ -1,21 +1,24 @@
 // 计算共享视频合成中的画面几何、运镜和文字时间区间。
+import type {TimelineTransition} from './transitionPresets';
+import type {ColorGrade} from './color';
 export type Motion = {
   preset_id: 'slow_push_in' | 'slow_pull_out' | 'pan_left' | 'pan_right' | 'pan_up' | 'pan_down';
   local_start_frame: number; local_end_frame: number; intensity: number;
   anchor_x: number; anchor_y: number; easing: 'linear' | 'ease_in_out';
 };
-export type Transform = {fit: 'cover' | 'contain'; anchor_x: number; anchor_y: number; scale: number; rotation_deg: number};
+export type Transform = {fit: 'cover' | 'contain'; anchor_x: number; anchor_y: number; scale: number; scale_x?: number; scale_y?: number; rotation_deg: number; position_x?: number; position_y?: number};
 export type PreparedClip = {
   clip_id: string; asset_id: string; kind: 'video' | 'image'; file: string;
   start_frame: number; end_frame: number; duration_frames: number; width: number; height: number;
-  transform: Transform; motion: Motion | null; color_preset: 'warm' | 'cool' | 'monochrome' | null;
+  transform: Transform; motion: Motion | null; color_preset: string | null;
+  color_preset_intensity?: number; color_grade?: ColorGrade;
   sourcePlayback?: {inFrame: number; outFrame: number; numerator: number; denominator: number; reverse: boolean};
   previewPlayback?: {trimBefore: number; playbackRate: number};
 };
 export type Plan = {
   composition: {width: number; height: number; fps: number};
   total_frames: number; clips: PreparedClip[]; mix_file: string;
-  transitions: {left_clip_id: string; right_clip_id: string; duration_frames: number}[];
+  transitions: TimelineTransition[];
   text_items: {text_id: string; text: string; x: number; y: number; font_size: number; color: string;
     style_preset: 'title' | 'subtitle'; anchor: {kind: 'timeline' | 'clip'; clip_id: string | null; start_frame: number; end_frame: number}}[];
 };
@@ -50,15 +53,17 @@ export function geometry(clip: PreparedClip, frame: number, width: number, heigh
     else if (m.preset_id === 'slow_pull_out') zoom *= 1 + m.intensity * (1 - p);
     else zoom *= 1 + m.intensity;
   }
-  const iw = clip.width * base * zoom, ih = clip.height * base * zoom;
-  if (tr.fit === 'cover') {
+  const iw = clip.width * base * zoom * (tr.scale_x ?? 1), ih = clip.height * base * zoom * (tr.scale_y ?? 1);
+  if (tr.fit === 'cover' && zoom >= 1) {
     const minX = viewWidth / (2 * iw), minY = viewHeight / (2 * ih);
-    ax = clamp(ax, minX, 1 - minX); ay = clamp(ay, minY, 1 - minY);
+    // 独立缩小某个轴时保留锚点；仅对仍能覆盖画布的轴约束裁切和运镜。
+    if (iw >= viewWidth) ax = clamp(ax, minX, 1 - minX);
+    if (ih >= viewHeight) ay = clamp(ay, minY, 1 - minY);
     if (m?.preset_id.startsWith('pan_')) {
       const axis = m.preset_id === 'pan_left' || m.preset_id === 'pan_right' ? 'x' : 'y';
       const progress = m.preset_id === 'pan_left' || m.preset_id === 'pan_up' ? 1 - p : p;
-      if (axis === 'x') ax = minX + (1 - 2 * minX) * progress;
-      else ay = minY + (1 - 2 * minY) * progress;
+      if (axis === 'x' && iw >= viewWidth) ax = minX + (1 - 2 * minX) * progress;
+      else if (axis === 'y' && ih >= viewHeight) ay = minY + (1 - 2 * minY) * progress;
     }
   }
   return {width: iw, height: ih, left: -ax * iw, top: -ay * ih, rotation: tr.rotation_deg};

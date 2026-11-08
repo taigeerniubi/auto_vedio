@@ -19,6 +19,7 @@ FIELD_NAMES = {
     "业务日志": "app_log", "检查": "checks",
 }
 EVENT_NAMES = {
+    "恢复任务": "agent_resumed", "重试模型": "model_retrying",
     "开始工具": "tool_started",
     "接口未处理异常": "request_failed", "接口请求结束": "request_completed",
     "接口业务异常": "request_rejected", "接口参数校验失败": "request_validation_failed",

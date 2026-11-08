@@ -10,6 +10,11 @@ import { Button, Icon, Modal } from "./components/Ui";
 import { anchorRange, layout } from "./timeline";
 import { progressLabel } from "./runProgress";
 import { TemplatesPanel, type MotionDraft } from "./components/TemplatesPanel";
+import {ColorPanel,type ColorDraft} from './components/ColorPanel';
+import { ExportDialog } from './components/ExportDialog';
+import { ProjectDialog } from './components/ProjectDialog';
+import { SavepointsDialog } from './components/SavepointsDialog';
+const CoverPanel=lazy(()=>import('./components/CoverPanel').then(module=>({default:module.CoverPanel})));
 const PreviewPanel = lazy(() =>
   import("./components/PreviewPanel").then((module) => ({
     default: module.PreviewPanel,
@@ -23,11 +28,16 @@ const DraftMonitor = lazy(() => import("./components/DraftMonitor").then(module 
  */
 export function App() {
   const e = useEditor();
-  const [section, setSection] = useState<Section | "templates">("assets");
+  const [section, setSection] = useState<Section | "templates" | "color">("assets");
   const [motionDraft, setMotionDraft] = useState<MotionDraft>(null);
-  const [dialog, setDialog] = useState<"project" | "settings" | null>(null);
+  const [colorDraft,setColorDraft]=useState<ColorDraft>(null);
+  const [coverOpen,setCoverOpen]=useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [dialog, setDialog] = useState<"project" | "settings" | "savepoints" | null>(null);
+  const previewing = !!(colorDraft || motionDraft);
   const [frame, setFrame] = useState(0);
   const player = useRef<PlayerRef>(null);
+  const audioPlayer = useRef<HTMLAudioElement>(null);
   const total = e.project ? layout(e.project.snapshot).total : 0;
   const step = e.activeRun?.events.at(-1);
   const activeStep = step && (step.事件 === "开始工具" || step.事件 === "请求模型")
@@ -62,16 +72,23 @@ export function App() {
     [e.selected, e.project?.revision, e.project?.project_id, section],
   );
   const seek = (target: number) => {
-    setFrame(target);
-    player.current?.seekTo(target);
+    const nextFrame = Math.max(0, Math.min(Math.round(target), total - 1));
+    setFrame(nextFrame);
+    player.current?.seekTo(nextFrame);
   };
 
   useEffect(() => {
     const shortcuts = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (!event.repeat && !dialog && !target.closest("dialog") && !e.busy && !previewing && e.project)
+          void e.savepoint();
+        return;
+      }
       if (
         target.closest(
-          'input, textarea, select, [contenteditable="true"], [role="separator"], dialog',
+          'input, textarea, select, audio, [data-audio-toggle], [contenteditable="true"], [role="separator"], [role="slider"], dialog',
         ) ||
         dialog
       )
@@ -86,12 +103,12 @@ export function App() {
       }
       if (event.key === "Delete" && e.selected && !e.busy) {
         event.preventDefault();
-        void e.edit("delete_clip", { clip_id: e.selected });
+        void e.deleteSelected();
       }
     };
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
-  }, [e.project, e.busy, e.selected, dialog]);
+  }, [e.project, e.busy, e.selected, dialog, previewing]);
 
   return (
     <div className="app-shell">
@@ -123,7 +140,7 @@ export function App() {
             <i className={`dot ${e.busy ? "amber" : ""}`} />
             {activeStep ||
               e.busy ||
-              (e.project ? "所有更改已保存" : "本地视频工作台")}
+              (previewing ? "正在预览调整" : e.project ? "所有更改已保存" : "本地视频工作台")}
           </span>
         </div>
         <div className="header-actions">
@@ -143,12 +160,18 @@ export function App() {
           >
             重做
           </Button>
+          <Button icon="save" className="savepoint-save" aria-label="暂存" title={previewing ? "请先应用或退出预览" : "暂存当前已应用的剪辑（Ctrl+S）"}
+            disabled={!e.project || !!e.busy || previewing} onClick={() => void e.savepoint()}>
+            <span className="savepoint-button-label">暂存</span>
+          </Button>
+          <Button icon="clock" className="savepoint-history" aria-label="暂存历史" title="查看和恢复暂存"
+            disabled={!e.project || !!e.busy} onClick={() => { player.current?.pause(); e.setError(null); setDialog("savepoints"); }} />
           <Button
             tone="primary"
-            disabled={!!e.busy || !total}
-            onClick={() => void e.exportVideo()}
+            disabled={!e.exportState.active && (!!e.busy || !total)}
+            onClick={() => { player.current?.pause(); setExportOpen(true); }}
           >
-            {e.busy === "正在导出成片" ? "导出中…" : "导出成片"}
+            {e.exportState.active ? `导出中 ${Math.round(e.exportState.job?.progress || 0)}%` : "导出成片"}
           </Button>
         </div>
       </header>
@@ -176,15 +199,18 @@ export function App() {
           />
         </div>
       )}
-      {e.exported && (
+      {e.savepointNotice && <div className="savepoint-banner" role="status">
+        <span>{e.savepointNotice}</span>
+        <Button icon="close" tone="ghost" aria-label="关闭暂存提示" onClick={e.clearSavepointNotice} />
+      </div>}
+      {e.exportState.job?.status === "completed" && e.exportState.job.result && (
         <div className="export-banner" role="status">
           <span>
-            ✓　版本 {e.exported.revision} 已导出 ·{" "}
-            {(e.exported.frames / 30).toFixed(1)} 秒
+            ✓　版本 {e.exportState.job.revision} 已导出 ·{" "}
+            {(e.exportState.job.result.frames / 30).toFixed(1)} 秒
+            {e.exportState.saving ? " · 正在保存…" : e.exportState.saved ? " · 已保存" : " · 可保存成片"}
           </span>
-          <a className="button primary" href={e.exported.download_url} download>
-            下载 MP4 <Icon name="download" />
-          </a>
+          <Button tone="primary" onClick={() => setExportOpen(true)}>查看成片 <Icon name="download" /></Button>
         </div>
       )}
       <ResizableWorkspace>
@@ -221,8 +247,12 @@ export function App() {
                 player.current?.play();
               }}
             />
+          ) : section === 'color' ? (
+            <ColorPanel editor={e} onDraft={setColorDraft}/>
           ) : (
-            <AssetsPanel editor={e} section={section} />
+            <AssetsPanel editor={e} section={section} audioPlayer={audioPlayer}
+              onAudioPlay={() => player.current?.pause()}
+              onTransitionPreview={target => { player.current?.pause(); seek(target); }} />
           )}
         </aside>
         <Suspense
@@ -247,7 +277,10 @@ export function App() {
               frame={frame}
               onFrame={setFrame}
               onError={e.report}
+              onPlay={() => audioPlayer.current?.pause()}
               motionDraft={motionDraft}
+              colorDraft={colorDraft}
+              editor={e}
             />
           )}
         </Suspense>
@@ -255,7 +288,9 @@ export function App() {
           editor={e}
           frame={Math.max(0, Math.min(frame, total - 1))}
           seek={seek}
+          onScrubStart={() => { player.current?.pause(); audioPlayer.current?.pause(); }}
           changedIds={changedIds}
+          onCover={() => { player.current?.pause(); setCoverOpen(true); }}
         />
         <AgentPanel
           key={e.project?.project_id}
@@ -270,7 +305,7 @@ export function App() {
           本地项目 {e.project ? `· 版本 ${e.project.revision}` : ""}
           {e.liveDraft ? " · 草稿未提交" : ""}
         </span>
-        <span>{e.busy || "准备就绪"}</span>
+        <span role="status">{e.busy || "准备就绪"}</span>
         <span>
           {e.project
             ? `${e.project.snapshot.composition.width} × ${e.project.snapshot.composition.height}`
@@ -278,6 +313,8 @@ export function App() {
           　·　30 fps
         </span>
       </footer>
+      {coverOpen&&e.project&&<Suspense fallback={null}><CoverPanel editor={e} frame={frame} onClose={()=>setCoverOpen(false)}/></Suspense>}
+      {exportOpen && e.project && <ExportDialog key={e.project.project_id} project={e.project} controller={e.exportState} onClose={() => setExportOpen(false)} />}
       {!e.project && !dialog && (
         <div className="welcome-card">
           <span className="eyebrow">A LITTLE STORY, YOUR WAY</span>
@@ -297,66 +334,23 @@ export function App() {
         </div>
       )}
       {dialog === "project" && (
-        <Modal title="你的剪辑项目" onClose={() => setDialog(null)}>
-          <form
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              const name = String(form.get("name")).trim();
-              if (name) {
-                await e.create(name, form.get("ratio") === "vertical");
-                setDialog(null);
-              }
-            }}
-          >
-            <label>
-              项目名称
-              <input
-                name="name"
-                aria-label="项目名称"
-                placeholder="给这段故事起个名字"
-                required
-                maxLength={100}
-                defaultValue="我的日常片段"
-              />
-            </label>
-            <label>
-              画布比例
-              <select name="ratio">
-                <option value="horizontal">横屏 16:9 · 1920 × 1080</option>
-                <option value="vertical">竖屏 9:16 · 1080 × 1920</option>
-              </select>
-            </label>
-            <Button type="submit" tone="primary" disabled={!!e.busy}>
-              创建项目
-            </Button>
-          </form>
-          {!!e.projects.length && (
-            <>
-              <h3 className="recent-title">已有项目</h3>
-              <div className="project-list">
-                {e.projects.map((p) => (
-                  <button
-                    key={p.project_id}
-                    disabled={!!e.busy}
-                    onClick={async () => {
-                      await e.open(p.project_id);
-                      setDialog(null);
-                    }}
-                  >
-                    <Icon name="folder" />
-                    <span>
-                      {p.name}
-                      <small>版本 {p.revision}</small>
-                    </span>
-                    <Icon name="right" />
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </Modal>
+        <ProjectDialog editor={e} onClose={() => setDialog(null)} onDeletedCurrent={() => {
+          player.current?.pause();
+          setFrame(0);
+          setColorDraft(null);
+          setMotionDraft(null);
+          setCoverOpen(false);
+          setExportOpen(false);
+        }} />
       )}
+      {dialog === "savepoints" && e.project && <SavepointsDialog editor={e} previewing={previewing}
+        onClose={() => setDialog(null)} onRestored={() => {
+          player.current?.pause();
+          player.current?.seekTo(0);
+          setFrame(0);
+          setColorDraft(null);
+          setMotionDraft(null);
+        }} />}
       {dialog === "settings" && (
         <Modal title="模型连接" onClose={() => setDialog(null)}>
           <div className="settings-content">

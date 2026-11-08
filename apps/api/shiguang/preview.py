@@ -69,7 +69,8 @@ def prepare_preview(pid, snapshot, assets):
             })})
     sound_key = {
         "version": 1, "total": total, "clips": sound_clips,
-        "transitions": [t.model_dump() for t in snapshot.transitions],
+        # 视觉转场类型不影响音频包络，切换效果时复用同一份混音。
+        "transitions": [t.model_dump(exclude={"preset_id", "preset_version"}) for t in snapshot.transitions],
         "audio": [a.model_dump() for a in snapshot.audio_items],
         # 片段锚点及压低规则依赖所有镜头的位置。
         "timeline": rows if snapshot.audio_items else [],

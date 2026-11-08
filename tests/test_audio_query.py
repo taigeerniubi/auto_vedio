@@ -28,7 +28,7 @@ def workspace(tmp_path, monkeypatch):
         assert request.url.path == "/v1/chat/completions"
         assert body["response_format"] == {"type": "json_object"} and body["reasoning_effort"] == "none"
         clip, question = body["messages"][1]["content"]
-        assert question["text"] == "第二次笑声在哪里结束？"
+        assert question["text"] in {"第二次笑声在哪里结束？", "这首音乐是什么风格？"}
         payload = clip["input_audio"]["data"].split(",")[1]
         with wave.open(io.BytesIO(base64.b64decode(payload)), "rb") as wav:
             assert wav.getnframes() == 24000 and wav.getframerate() == 24000
@@ -91,15 +91,61 @@ def test_audio_query_rejects_invalid_ranges_and_foreign_assets(workspace):
 
 
 def test_audio_query_validates_status_and_timestamps(workspace):
-    client, _, pid, replies, _ = workspace
+    client, store, pid, replies, _ = workspace
     for status, matches, expected in [
         ("matched", [], 200), ("not_found", [], 200), ("uncertain", [MARK], 200),
         ("not_found", [MARK], 502), ("matched", [{**MARK, "anchor_ms": 700}], 502),
         ("matched", [{**MARK, "end_ms": 1001, "anchor_ms": 1001}], 502),
     ]:
+        # 每次明确检查一份新的模型回答，缓存行为由独立测试覆盖。
+        with store.connect() as con:
+            con.execute("DELETE FROM audio_query_cache")
         replies.append({"status": status, "answer": "模型回答", "matches": matches})
         response = client.post(f"/api/v1/projects/{pid}/assets/music/audio-query", json=QUESTION)
         assert response.status_code == expected, response.text
+
+
+@pytest.mark.parametrize("status", ["matched", "not_found", "uncertain"])
+def test_overall_style_uses_untimed_schema_and_stays_readonly(workspace, status):
+    client, store, pid, replies, requests = workspace
+    replies.extend([{"status": status, "answer": "电子舞曲，合成器与鼓机，节奏轻快。"}] * 2)
+    question = {**QUESTION, "query": "这首音乐是什么风格？", "include_timestamps": False}
+    before = store.project(pid)
+    response = client.post(f"/api/v1/projects/{pid}/assets/music/audio-query", json=question)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == status and data["matches"] == [] and data["timing"] == "not_requested"
+    assert data["range"] == {"start_ms": 500, "end_ms": 1500}
+    draft = store.create_draft(pid)
+    result = store.call(draft["id"], "query_audio", {"asset_id": "music", **question})
+    assert result["ok"] and result["data"] == {**data, "cache_hit": True}
+    assert store.draft(draft["id"]) == draft and store.project(pid) == before
+    assert len(requests) == 1
+    for body in requests:
+        prompt = body["messages"][0]["content"]
+        schema = json.loads(prompt[prompt.index('{"'):])
+        assert set(schema["properties"]) == {"status", "answer"} and "$defs" not in schema
+        assert "不要返回 matches" in prompt
+
+
+def test_invalid_model_answer_reports_rule_without_logging_raw_content(workspace, caplog):
+    client, store, pid, replies, requests = workspace
+    secret = "private-model-answer-do-not-log"
+    replies.append({"status": "matched", "answer": secret, "matches": [{**MARK, "anchor_ms": 700}]})
+    draft = store.create_draft(pid)
+    result = store.call(draft["id"], "query_audio", {"asset_id": "music", **QUESTION})
+    assert not result["ok"] and result["error_code"] == "MODEL_ANALYSIS_INVALID"
+    assert "锚点超出声音区间" in result["summary"]
+    assert result["details"]["validation_errors"][0]["field"] == ["matches", 0]
+    assert secret not in json.dumps(result) and secret not in caplog.text
+    assert "value_error" in caplog.text
+    assert store.draft(draft["id"]) == draft and len(requests) == 1
+    # 格式错误仍应拒绝，整体分析不能通过省略正文或填入无关标记绕过校验。
+    replies.append({"status": "matched", "matches": []})
+    response = client.post(f"/api/v1/projects/{pid}/assets/music/audio-query",
+                           json={**QUESTION, "include_timestamps": False})
+    assert response.status_code == 502
+    assert response.json()["details"]["validation_errors"][0]["field"] == ["answer"]
 
 
 def test_only_audio_key_is_required(monkeypatch):

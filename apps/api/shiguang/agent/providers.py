@@ -1,16 +1,19 @@
 """适配 OpenAI Responses 与 DeepSeek Chat Completions 的工具调用协议。"""
 from dataclasses import dataclass, field
+from copy import deepcopy
 import json
 import logging
+import math
 import os
 import re
+from time import monotonic, sleep
 from urllib.parse import urlparse
 
 import httpx
 
 from ..tools import ToolError
 from ..observability import log_event, sanitize
-from .contracts import ToolCall
+from .contracts import Finish, ToolCall
 from .prompts import SYSTEM_PROMPT, context_parts, tool_definitions
 
 
@@ -21,6 +24,8 @@ class ModelConfig:
     api_key: str = field(repr=False)
     base_url: str = ""
     max_output_tokens: int = 16384
+    request_timeout_seconds: float = 120
+    retries: int = 1
 
     @classmethod
     def from_env(cls):
@@ -36,9 +41,14 @@ class ModelConfig:
             max_output_tokens = int(os.getenv("SHIGUANG_MODEL_MAX_OUTPUT_TOKENS", "16384"))
         except ValueError as exc:
             raise ToolError("MODEL_CONFIG", "SHIGUANG_MODEL_MAX_OUTPUT_TOKENS must be an integer between 1024 and 65536") from exc
+        try:
+            request_timeout = float(os.getenv("SHIGUANG_MODEL_TIMEOUT_SECONDS", "120"))
+            retries = int(os.getenv("SHIGUANG_MODEL_RETRIES", "1"))
+        except ValueError as exc:
+            raise ToolError("MODEL_CONFIG", "SHIGUANG_MODEL_TIMEOUT_SECONDS and SHIGUANG_MODEL_RETRIES must be numbers") from exc
         config = cls(os.getenv("SHIGUANG_MODEL_PROVIDER", "deepseek").lower(),
                      os.getenv("SHIGUANG_MODEL_NAME", ""), os.getenv("SHIGUANG_MODEL_API_KEY", ""),
-                     os.getenv("SHIGUANG_MODEL_BASE_URL", ""), max_output_tokens)
+                     os.getenv("SHIGUANG_MODEL_BASE_URL", ""), max_output_tokens, request_timeout, retries)
         config.validate()
         return config
 
@@ -54,6 +64,10 @@ class ModelConfig:
             raise ToolError("MODEL_CONFIG", "请配置 SHIGUANG_MODEL_NAME 和 SHIGUANG_MODEL_API_KEY")
         if type(self.max_output_tokens) is not int or not 1024 <= self.max_output_tokens <= 65536:
             raise ToolError("MODEL_CONFIG", "SHIGUANG_MODEL_MAX_OUTPUT_TOKENS must be an integer between 1024 and 65536")
+        if not math.isfinite(self.request_timeout_seconds) or self.request_timeout_seconds <= 0:
+            raise ToolError("MODEL_CONFIG", "SHIGUANG_MODEL_TIMEOUT_SECONDS must be a finite positive number")
+        if type(self.retries) is not int or not 0 <= self.retries <= 3:
+            raise ToolError("MODEL_CONFIG", "SHIGUANG_MODEL_RETRIES must be an integer between 0 and 3")
         url = urlparse(self.url)
         if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
             raise ToolError("MODEL_CONFIG", "模型地址必须是不含凭据、查询参数或片段的 HTTPS 地址")
@@ -77,7 +91,7 @@ class ModelConfig:
 
 
 class RemoteSession:
-    def __init__(self, config: ModelConfig, context: dict, transport=None):
+    def __init__(self, config: ModelConfig, context: dict, transport=None, *, clock=monotonic, wait=sleep):
         """创建独立会话并保留必要的工具协议历史。
 
         Args:
@@ -87,6 +101,9 @@ class RemoteSession:
         """
         config.validate()
         self.config = config
+        self.clock, self.wait = clock, wait
+        self.check_active = lambda: None
+        self.on_retry = lambda attempt, max_attempts: None
         prefix, suffix = context_parts(context)
         prompt_text = "\n".join(part for part in [*prefix, suffix] if part) or "{}"
         content = prompt_text
@@ -106,7 +123,7 @@ class RemoteSession:
         self.history = [{"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": content}]
 
-    def step(self, results: list[tuple[str, dict]], timeout: float) -> list[ToolCall]:
+    def step(self, results: list[tuple[str, dict]], timeout: float | None) -> list[ToolCall]:
         """发送一轮请求并解析工具调用，服务错误不会泄露响应正文。
 
         Args:
@@ -134,7 +151,7 @@ class RemoteSession:
                     "tools": self.tools}
             endpoint = "/chat/completions"
         try:
-            response = self.client.post(self.config.url + endpoint, json=body, timeout=min(timeout, 60))
+            response = self._request(endpoint, body, timeout)
             response.raise_for_status()
             data = response.json()
             if openai:
@@ -145,6 +162,12 @@ class RemoteSession:
                 self.history.extend(outputs)
                 self.private_texts.extend(x.get("encrypted_content", "") for x in outputs if isinstance(x, dict))
                 calls = [ToolCall(x["call_id"], x["name"], x["arguments"]) for x in outputs if x["type"] == "function_call"]
+                # 只读取面向用户的 output_text；reasoning/summary/encrypted_content 不属于答复。
+                reply = "\n\n".join(part["text"] for output in outputs
+                    if output.get("type") == "message" and output.get("role") == "assistant"
+                    for part in output.get("content", [])
+                    if isinstance(part, dict) and part.get("type") == "output_text" and isinstance(part.get("text"), str))
+                self.private_texts.append(reply)
             else:
                 choice = data["choices"][0]
                 diagnostics = self.response_diagnostics(data, response, openai=False)
@@ -155,11 +178,12 @@ class RemoteSession:
                 # 保留思考模型继续工具调用所需的字段，但不写入日志或运行记录。
                 self.history.append({k: v for k, v in message.items() if k in {"role", "content", "tool_calls", "reasoning_content"}})
                 calls = [ToolCall(x["id"], x["function"]["name"], x["function"]["arguments"]) for x in (message.get("tool_calls") or [])]
+                reply = message.get("content") if isinstance(message.get("content"), str) else ""
             if any(not isinstance(c.call_id, str) or not c.call_id or not isinstance(c.name, str) or not isinstance(c.arguments, str) for c in calls):
                 raise ValueError("无效工具调用结构")
             if len({c.call_id for c in calls}) != len(calls):
                 raise ValueError("工具调用编号重复")
-            return calls
+            return self._preserve_visible_reply(calls, reply)
         except httpx.TimeoutException as exc:
             self.log_failure("模型请求超时", exc)
             raise ToolError("MODEL_TIMEOUT", "模型请求超时，草稿不会提交") from exc
@@ -209,6 +233,104 @@ class RemoteSession:
             else:
                 self.log_failure("模型协议解析失败", exc)
             raise ToolError("MODEL_PROTOCOL_ERROR", "模型返回了无法解析的工具调用协议") from exc
+
+    @staticmethod
+    def _preserve_visible_reply(calls, reply):
+        """保留与单独 finish 一起返回的公开答复，不改变其他工具或终止动作。"""
+        if len(calls) != 1 or calls[0].name != "finish" or not reply.strip():
+            return calls
+        try:
+            # 原 finish 必须有效；不能通过替换答复掩盖工具协议错误。
+            Finish.model_validate_json(calls[0].arguments)
+            answer = Finish(summary=reply.strip())
+        except ValueError:
+            return calls
+        return [ToolCall(calls[0].call_id, "finish", answer.model_dump_json())]
+
+    def _request(self, endpoint, body, timeout):
+        """在同一轮内重发完全相同的模型请求，重试仍遵守剩余预算和取消状态。"""
+        deadline = self.clock() + timeout if timeout is not None else None
+        for attempt in range(self.config.retries + 1):
+            self.check_active()
+            remaining = deadline - self.clock() if deadline is not None else None
+            if remaining is not None and remaining <= 0:
+                raise ToolError("TIME_LIMIT", "已达到运行时间预算，可继续此任务")
+            response = None
+            try:
+                response = self.client.post(self.config.url + endpoint, json=body,
+                    timeout=min(remaining, self.config.request_timeout_seconds) if remaining is not None
+                    else self.config.request_timeout_seconds)
+                if not self._retryable_response(response) or attempt >= self.config.retries:
+                    return response
+            except httpx.RequestError:
+                self.check_active()
+                if deadline is not None and self.clock() >= deadline:
+                    raise ToolError("TIME_LIMIT", "已达到运行时间预算，可继续此任务") from None
+                if attempt >= self.config.retries:
+                    raise
+            delay = 0.5 * 2 ** attempt
+            if response is not None:
+                try:
+                    retry_after = float(response.headers.get("Retry-After", ""))
+                    if math.isfinite(retry_after):
+                        delay = min(30, max(delay, retry_after))
+                except ValueError:
+                    pass
+                response.close()
+            log_event("model_request_retry", level=logging.WARNING, provider=self.config.provider,
+                      model=self.config.model, attempt=attempt + 2, max_attempts=self.config.retries + 1,
+                      delay_seconds=delay, upstream_status=response.status_code if response is not None else None)
+            self.on_retry(attempt + 2, self.config.retries + 1)
+            # 短间隔等待让取消和总时间预算在退避期间仍能生效。
+            while delay > 0:
+                self.check_active()
+                if deadline is not None and self.clock() >= deadline:
+                    raise ToolError("TIME_LIMIT", "已达到运行时间预算，可继续此任务")
+                interval = min(delay, 0.1)
+                if deadline is not None:
+                    interval = min(interval, max(0, deadline - self.clock()))
+                self.wait(interval)
+                delay -= interval
+        raise AssertionError("Retry loop must return or raise")
+
+    @staticmethod
+    def _retryable_response(response):
+        """仅重试暂时错误，余额不足和鉴权失败直接保留原始诊断。"""
+        if response.status_code == 429:
+            try:
+                data = response.json()
+                problem = data.get("error", {}) if isinstance(data, dict) else {}
+                if isinstance(problem, dict) and (problem.get("code") in {"credit_balance_exhausted", "insufficient_quota"}
+                                                or problem.get("type") == "insufficient_quota"):
+                    return False
+            except ValueError:
+                pass
+        return response.status_code in {408, 429} or 500 <= response.status_code < 600
+
+    def export_state(self):
+        """仅向本机检查点导出协议历史，不导出密钥、客户端或日志脱敏列表。"""
+        return {"version": 1, "provider": self.config.provider, "model": self.config.model,
+                "base_url": self.config.url, "history": deepcopy(self.history)}
+
+    def restore_state(self, state):
+        """恢复同一模型与端点的协议历史，不把状态传给其他服务商。"""
+        if (not isinstance(state, dict) or state.get("version") != 1 or
+            state.get("provider") != self.config.provider or state.get("model") != self.config.model or
+            state.get("base_url") != self.config.url or not isinstance(state.get("history"), list) or
+            not all(isinstance(item, dict) for item in state["history"])):
+            raise ToolError("RESUME_MODEL_CHANGED", "模型配置已变更，无法恢复原模型上下文")
+        self.history = deepcopy(state["history"])
+
+        def protect(value):
+            if isinstance(value, str):
+                self.private_texts.append(value)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    protect(item)
+            elif isinstance(value, list):
+                for item in value:
+                    protect(item)
+        protect(self.history)
 
     def response_diagnostics(self, data, response, *, openai):
         """仅提取完成原因和数字用量，不记录模型正文或推理内容。

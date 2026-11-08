@@ -101,8 +101,23 @@
                 "anyOf": [
                   {
                     "enum": [
+                      "natural",
+                      "cream",
                       "warm",
+                      "portrait",
+                      "soft_skin",
+                      "cool_portrait",
+                      "forest",
+                      "ocean",
+                      "autumn",
+                      "food",
+                      "coffee",
+                      "fresh",
+                      "teal_orange",
+                      "faded_film",
+                      "vintage",
                       "cool",
+                      "neon",
                       "monochrome"
                     ],
                     "type": "string"
@@ -113,6 +128,16 @@
                 ],
                 "default": null,
                 "title": "Color Preset"
+              },
+              "color_preset_intensity": {
+                "default": 1,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Color Preset Intensity",
+                "type": "number"
+              },
+              "color_grade": {
+                "$ref": "#/$defs/ColorGrade"
               },
               "derived_from_clip_id": {
                 "anyOf": [
@@ -133,6 +158,296 @@
               "kind"
             ],
             "title": "Clip",
+            "type": "object"
+          },
+          "ColorCurves": {
+            "additionalProperties": false,
+            "properties": {
+              "master": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Master",
+                "type": "array"
+              },
+              "red": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Red",
+                "type": "array"
+              },
+              "green": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Green",
+                "type": "array"
+              },
+              "blue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Blue",
+                "type": "array"
+              },
+              "hue_hue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Hue",
+                "type": "array"
+              },
+              "hue_sat": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Sat",
+                "type": "array"
+              },
+              "hue_lum": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Lum",
+                "type": "array"
+              }
+            },
+            "title": "ColorCurves",
+            "type": "object"
+          },
+          "ColorGrade": {
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "exposure": {
+                "default": 0,
+                "maximum": 5,
+                "minimum": -5,
+                "title": "Exposure",
+                "type": "number"
+              },
+              "contrast": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Contrast",
+                "type": "number"
+              },
+              "temperature": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Temperature",
+                "type": "number"
+              },
+              "tint": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Tint",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "vibrance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Vibrance",
+                "type": "number"
+              },
+              "highlights": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Highlights",
+                "type": "number"
+              },
+              "shadows": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Shadows",
+                "type": "number"
+              },
+              "whites": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Whites",
+                "type": "number"
+              },
+              "blacks": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Blacks",
+                "type": "number"
+              },
+              "wheels": {
+                "$ref": "#/$defs/ColorWheels"
+              },
+              "hsl": {
+                "$ref": "#/$defs/HslChannels"
+              },
+              "curves": {
+                "$ref": "#/$defs/ColorCurves"
+              }
+            },
+            "title": "ColorGrade",
+            "type": "object"
+          },
+          "ColorWheel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 360,
+                "minimum": 0,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "ColorWheel",
+            "type": "object"
+          },
+          "ColorWheels": {
+            "additionalProperties": false,
+            "properties": {
+              "shadows": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "midtones": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "highlights": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "offset": {
+                "$ref": "#/$defs/ColorWheel"
+              }
+            },
+            "title": "ColorWheels",
+            "type": "object"
+          },
+          "CurvePoint": {
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "X",
+                "type": "number"
+              },
+              "y": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Y",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "title": "CurvePoint",
+            "type": "object"
+          },
+          "HslChannel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 180,
+                "minimum": -180,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "HslChannel",
+            "type": "object"
+          },
+          "HslChannels": {
+            "additionalProperties": false,
+            "properties": {
+              "red": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "orange": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "yellow": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "green": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "cyan": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "blue": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "purple": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "magenta": {
+                "$ref": "#/$defs/HslChannel"
+              }
+            },
+            "title": "HslChannels",
             "type": "object"
           },
           "Motion": {
@@ -234,8 +549,22 @@
               "scale": {
                 "default": 1,
                 "maximum": 4,
-                "minimum": 1,
+                "minimum": 0.1,
                 "title": "Scale",
+                "type": "number"
+              },
+              "scale_x": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale X",
+                "type": "number"
+              },
+              "scale_y": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale Y",
                 "type": "number"
               },
               "rotation_deg": {
@@ -243,6 +572,20 @@
                 "maximum": 15,
                 "minimum": -15,
                 "title": "Rotation Deg",
+                "type": "number"
+              },
+              "position_x": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position X",
+                "type": "number"
+              },
+              "position_y": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position Y",
                 "type": "number"
               }
             },
@@ -347,7 +690,7 @@
     },
     {
       "name": "delete_clip",
-      "description": "删除片段，连带删除其专属文字、音频、转场及配乐压低规则。",
+      "description": "删除片段及其专属效果，并收短或移除超出新成片结尾的文字和配乐；可撤销。",
       "writes_draft": true,
       "parameters": {
         "additionalProperties": false,
@@ -361,6 +704,25 @@
           "clip_id"
         ],
         "title": "ClipId",
+        "type": "object"
+      }
+    },
+    {
+      "name": "remove_asset",
+      "description": "从项目移除素材及其时间线引用，可撤销；保留磁盘原文件。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id"
+        ],
+        "title": "AssetId",
         "type": "object"
       }
     },
@@ -495,8 +857,23 @@
                 "anyOf": [
                   {
                     "enum": [
+                      "natural",
+                      "cream",
                       "warm",
+                      "portrait",
+                      "soft_skin",
+                      "cool_portrait",
+                      "forest",
+                      "ocean",
+                      "autumn",
+                      "food",
+                      "coffee",
+                      "fresh",
+                      "teal_orange",
+                      "faded_film",
+                      "vintage",
                       "cool",
+                      "neon",
                       "monochrome"
                     ],
                     "type": "string"
@@ -507,6 +884,16 @@
                 ],
                 "default": null,
                 "title": "Color Preset"
+              },
+              "color_preset_intensity": {
+                "default": 1,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Color Preset Intensity",
+                "type": "number"
+              },
+              "color_grade": {
+                "$ref": "#/$defs/ColorGrade"
               },
               "derived_from_clip_id": {
                 "anyOf": [
@@ -527,6 +914,296 @@
               "kind"
             ],
             "title": "Clip",
+            "type": "object"
+          },
+          "ColorCurves": {
+            "additionalProperties": false,
+            "properties": {
+              "master": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Master",
+                "type": "array"
+              },
+              "red": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Red",
+                "type": "array"
+              },
+              "green": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Green",
+                "type": "array"
+              },
+              "blue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Blue",
+                "type": "array"
+              },
+              "hue_hue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Hue",
+                "type": "array"
+              },
+              "hue_sat": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Sat",
+                "type": "array"
+              },
+              "hue_lum": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Lum",
+                "type": "array"
+              }
+            },
+            "title": "ColorCurves",
+            "type": "object"
+          },
+          "ColorGrade": {
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "exposure": {
+                "default": 0,
+                "maximum": 5,
+                "minimum": -5,
+                "title": "Exposure",
+                "type": "number"
+              },
+              "contrast": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Contrast",
+                "type": "number"
+              },
+              "temperature": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Temperature",
+                "type": "number"
+              },
+              "tint": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Tint",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "vibrance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Vibrance",
+                "type": "number"
+              },
+              "highlights": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Highlights",
+                "type": "number"
+              },
+              "shadows": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Shadows",
+                "type": "number"
+              },
+              "whites": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Whites",
+                "type": "number"
+              },
+              "blacks": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Blacks",
+                "type": "number"
+              },
+              "wheels": {
+                "$ref": "#/$defs/ColorWheels"
+              },
+              "hsl": {
+                "$ref": "#/$defs/HslChannels"
+              },
+              "curves": {
+                "$ref": "#/$defs/ColorCurves"
+              }
+            },
+            "title": "ColorGrade",
+            "type": "object"
+          },
+          "ColorWheel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 360,
+                "minimum": 0,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "ColorWheel",
+            "type": "object"
+          },
+          "ColorWheels": {
+            "additionalProperties": false,
+            "properties": {
+              "shadows": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "midtones": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "highlights": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "offset": {
+                "$ref": "#/$defs/ColorWheel"
+              }
+            },
+            "title": "ColorWheels",
+            "type": "object"
+          },
+          "CurvePoint": {
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "X",
+                "type": "number"
+              },
+              "y": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Y",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "title": "CurvePoint",
+            "type": "object"
+          },
+          "HslChannel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 180,
+                "minimum": -180,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "HslChannel",
+            "type": "object"
+          },
+          "HslChannels": {
+            "additionalProperties": false,
+            "properties": {
+              "red": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "orange": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "yellow": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "green": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "cyan": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "blue": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "purple": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "magenta": {
+                "$ref": "#/$defs/HslChannel"
+              }
+            },
+            "title": "HslChannels",
             "type": "object"
           },
           "Motion": {
@@ -628,8 +1305,22 @@
               "scale": {
                 "default": 1,
                 "maximum": 4,
-                "minimum": 1,
+                "minimum": 0.1,
                 "title": "Scale",
+                "type": "number"
+              },
+              "scale_x": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale X",
+                "type": "number"
+              },
+              "scale_y": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale Y",
                 "type": "number"
               },
               "rotation_deg": {
@@ -637,6 +1328,20 @@
                 "maximum": 15,
                 "minimum": -15,
                 "title": "Rotation Deg",
+                "type": "number"
+              },
+              "position_x": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position X",
+                "type": "number"
+              },
+              "position_y": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position Y",
                 "type": "number"
               }
             },
@@ -769,8 +1474,23 @@
                 "anyOf": [
                   {
                     "enum": [
+                      "natural",
+                      "cream",
                       "warm",
+                      "portrait",
+                      "soft_skin",
+                      "cool_portrait",
+                      "forest",
+                      "ocean",
+                      "autumn",
+                      "food",
+                      "coffee",
+                      "fresh",
+                      "teal_orange",
+                      "faded_film",
+                      "vintage",
                       "cool",
+                      "neon",
                       "monochrome"
                     ],
                     "type": "string"
@@ -781,6 +1501,16 @@
                 ],
                 "default": null,
                 "title": "Color Preset"
+              },
+              "color_preset_intensity": {
+                "default": 1,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Color Preset Intensity",
+                "type": "number"
+              },
+              "color_grade": {
+                "$ref": "#/$defs/ColorGrade"
               },
               "derived_from_clip_id": {
                 "anyOf": [
@@ -801,6 +1531,296 @@
               "kind"
             ],
             "title": "Clip",
+            "type": "object"
+          },
+          "ColorCurves": {
+            "additionalProperties": false,
+            "properties": {
+              "master": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Master",
+                "type": "array"
+              },
+              "red": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Red",
+                "type": "array"
+              },
+              "green": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Green",
+                "type": "array"
+              },
+              "blue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Blue",
+                "type": "array"
+              },
+              "hue_hue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Hue",
+                "type": "array"
+              },
+              "hue_sat": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Sat",
+                "type": "array"
+              },
+              "hue_lum": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Lum",
+                "type": "array"
+              }
+            },
+            "title": "ColorCurves",
+            "type": "object"
+          },
+          "ColorGrade": {
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "exposure": {
+                "default": 0,
+                "maximum": 5,
+                "minimum": -5,
+                "title": "Exposure",
+                "type": "number"
+              },
+              "contrast": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Contrast",
+                "type": "number"
+              },
+              "temperature": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Temperature",
+                "type": "number"
+              },
+              "tint": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Tint",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "vibrance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Vibrance",
+                "type": "number"
+              },
+              "highlights": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Highlights",
+                "type": "number"
+              },
+              "shadows": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Shadows",
+                "type": "number"
+              },
+              "whites": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Whites",
+                "type": "number"
+              },
+              "blacks": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Blacks",
+                "type": "number"
+              },
+              "wheels": {
+                "$ref": "#/$defs/ColorWheels"
+              },
+              "hsl": {
+                "$ref": "#/$defs/HslChannels"
+              },
+              "curves": {
+                "$ref": "#/$defs/ColorCurves"
+              }
+            },
+            "title": "ColorGrade",
+            "type": "object"
+          },
+          "ColorWheel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 360,
+                "minimum": 0,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "ColorWheel",
+            "type": "object"
+          },
+          "ColorWheels": {
+            "additionalProperties": false,
+            "properties": {
+              "shadows": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "midtones": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "highlights": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "offset": {
+                "$ref": "#/$defs/ColorWheel"
+              }
+            },
+            "title": "ColorWheels",
+            "type": "object"
+          },
+          "CurvePoint": {
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "X",
+                "type": "number"
+              },
+              "y": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Y",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "title": "CurvePoint",
+            "type": "object"
+          },
+          "HslChannel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 180,
+                "minimum": -180,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "HslChannel",
+            "type": "object"
+          },
+          "HslChannels": {
+            "additionalProperties": false,
+            "properties": {
+              "red": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "orange": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "yellow": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "green": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "cyan": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "blue": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "purple": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "magenta": {
+                "$ref": "#/$defs/HslChannel"
+              }
+            },
+            "title": "HslChannels",
             "type": "object"
           },
           "Motion": {
@@ -902,8 +1922,22 @@
               "scale": {
                 "default": 1,
                 "maximum": 4,
-                "minimum": 1,
+                "minimum": 0.1,
                 "title": "Scale",
+                "type": "number"
+              },
+              "scale_x": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale X",
+                "type": "number"
+              },
+              "scale_y": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale Y",
                 "type": "number"
               },
               "rotation_deg": {
@@ -911,6 +1945,20 @@
                 "maximum": 15,
                 "minimum": -15,
                 "title": "Rotation Deg",
+                "type": "number"
+              },
+              "position_x": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position X",
+                "type": "number"
+              },
+              "position_y": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position Y",
                 "type": "number"
               }
             },
@@ -974,7 +2022,7 @@
     },
     {
       "name": "set_transform",
-      "description": "设置 cover/contain、锚点、缩放和基础旋转；cover 自动补足旋转覆盖范围。",
+      "description": "设置 cover/contain、锚点、0.1–4 倍整体缩放 scale、旋转及位置。scale_x/y 为额外的宽/高拉伸倍数（0.1–4，默认 1）；只改一个轴可自由拉伸。position_x/y 为相对画布宽高的平移，0 居中；缩小允许黑边。",
       "writes_draft": true,
       "parameters": {
         "$defs": {
@@ -1007,8 +2055,22 @@
               "scale": {
                 "default": 1,
                 "maximum": 4,
-                "minimum": 1,
+                "minimum": 0.1,
                 "title": "Scale",
+                "type": "number"
+              },
+              "scale_x": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale X",
+                "type": "number"
+              },
+              "scale_y": {
+                "default": 1,
+                "maximum": 4,
+                "minimum": 0.1,
+                "title": "Scale Y",
                 "type": "number"
               },
               "rotation_deg": {
@@ -1016,6 +2078,20 @@
                 "maximum": 15,
                 "minimum": -15,
                 "title": "Rotation Deg",
+                "type": "number"
+              },
+              "position_x": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position X",
+                "type": "number"
+              },
+              "position_y": {
+                "default": 0,
+                "maximum": 2,
+                "minimum": -2,
+                "title": "Position Y",
                 "type": "number"
               }
             },
@@ -1145,7 +2221,7 @@
     },
     {
       "name": "set_transition",
-      "description": "设置相邻片段的叠化；duration_frames=0 清除。",
+      "description": "设置相邻镜头转场：dissolve 叠化、slide_* 推移、wipe_* 擦除、fade_black 淡黑、fade_white 闪白、iris_open 圆形展开、flip_* 翻转、cube_* 立方体、clock_wipe 时钟擦除、push_cut 冲击切换、cross_zoom 缩放模糊、blur_slide_* 模糊甩镜、film_burn 胶片漏光、glitch 故障闪切。* 为 left/right/up/down，表示运动方向。duration_frames=0 清除；重叠缩短成片，越界文字和配乐同步收短。",
       "writes_draft": true,
       "parameters": {
         "additionalProperties": false,
@@ -1164,8 +2240,38 @@
             "type": "integer"
           },
           "preset_id": {
-            "const": "dissolve",
             "default": "dissolve",
+            "enum": [
+              "dissolve",
+              "slide_left",
+              "slide_right",
+              "slide_up",
+              "slide_down",
+              "wipe_left",
+              "wipe_right",
+              "wipe_up",
+              "wipe_down",
+              "fade_black",
+              "fade_white",
+              "iris_open",
+              "flip_left",
+              "flip_right",
+              "flip_up",
+              "flip_down",
+              "cube_left",
+              "cube_right",
+              "cube_up",
+              "cube_down",
+              "clock_wipe",
+              "push_cut",
+              "cross_zoom",
+              "blur_slide_left",
+              "blur_slide_right",
+              "blur_slide_up",
+              "blur_slide_down",
+              "film_burn",
+              "glitch"
+            ],
             "title": "Preset Id",
             "type": "string"
           },
@@ -1187,7 +2293,7 @@
     },
     {
       "name": "set_color_preset",
-      "description": "应用暖色、冷色、黑白预设；preset_id=null 清除。",
+      "description": "应用 list_presets 中的 18 款色彩风格，intensity=0–1；preset_id=null 清除滤镜，保留手动调色。",
       "writes_draft": true,
       "parameters": {
         "additionalProperties": false,
@@ -1200,8 +2306,23 @@
             "anyOf": [
               {
                 "enum": [
+                  "natural",
+                  "cream",
                   "warm",
+                  "portrait",
+                  "soft_skin",
+                  "cool_portrait",
+                  "forest",
+                  "ocean",
+                  "autumn",
+                  "food",
+                  "coffee",
+                  "fresh",
+                  "teal_orange",
+                  "faded_film",
+                  "vintage",
                   "cool",
+                  "neon",
                   "monochrome"
                 ],
                 "type": "string"
@@ -1217,6 +2338,13 @@
             "default": 1,
             "title": "Preset Version",
             "type": "integer"
+          },
+          "intensity": {
+            "default": 1,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Intensity",
+            "type": "number"
           }
         },
         "required": [
@@ -1224,6 +2352,509 @@
           "preset_id"
         ],
         "title": "ColorArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_color_grade",
+      "description": "调整一个或多个片段的曝光 EV、对比度、白平衡、饱和度、鲜艳度、明暗、四个色轮、八色 HSL、RGB/色相曲线。默认只更新显式传入的参数；replace=true 替换全部手动参数。曲线 x 从 0 到 1 严格递增，色相曲线首尾 y 相同，y=0.5 为无变化。enabled=false 旁路手动调色。处理为浮点 SDR，不是 HDR 色彩管理。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "ColorCurves": {
+            "additionalProperties": false,
+            "properties": {
+              "master": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Master",
+                "type": "array"
+              },
+              "red": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Red",
+                "type": "array"
+              },
+              "green": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Green",
+                "type": "array"
+              },
+              "blue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Blue",
+                "type": "array"
+              },
+              "hue_hue": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Hue",
+                "type": "array"
+              },
+              "hue_sat": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Sat",
+                "type": "array"
+              },
+              "hue_lum": {
+                "items": {
+                  "$ref": "#/$defs/CurvePoint"
+                },
+                "maxItems": 16,
+                "minItems": 2,
+                "title": "Hue Lum",
+                "type": "array"
+              }
+            },
+            "title": "ColorCurves",
+            "type": "object"
+          },
+          "ColorGrade": {
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "exposure": {
+                "default": 0,
+                "maximum": 5,
+                "minimum": -5,
+                "title": "Exposure",
+                "type": "number"
+              },
+              "contrast": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Contrast",
+                "type": "number"
+              },
+              "temperature": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Temperature",
+                "type": "number"
+              },
+              "tint": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Tint",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 1,
+                "maximum": 2,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "vibrance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Vibrance",
+                "type": "number"
+              },
+              "highlights": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Highlights",
+                "type": "number"
+              },
+              "shadows": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Shadows",
+                "type": "number"
+              },
+              "whites": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Whites",
+                "type": "number"
+              },
+              "blacks": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Blacks",
+                "type": "number"
+              },
+              "wheels": {
+                "$ref": "#/$defs/ColorWheels"
+              },
+              "hsl": {
+                "$ref": "#/$defs/HslChannels"
+              },
+              "curves": {
+                "$ref": "#/$defs/ColorCurves"
+              }
+            },
+            "title": "ColorGrade",
+            "type": "object"
+          },
+          "ColorWheel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 360,
+                "minimum": 0,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "ColorWheel",
+            "type": "object"
+          },
+          "ColorWheels": {
+            "additionalProperties": false,
+            "properties": {
+              "shadows": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "midtones": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "highlights": {
+                "$ref": "#/$defs/ColorWheel"
+              },
+              "offset": {
+                "$ref": "#/$defs/ColorWheel"
+              }
+            },
+            "title": "ColorWheels",
+            "type": "object"
+          },
+          "CurvePoint": {
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "X",
+                "type": "number"
+              },
+              "y": {
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Y",
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ],
+            "title": "CurvePoint",
+            "type": "object"
+          },
+          "HslChannel": {
+            "additionalProperties": false,
+            "properties": {
+              "hue": {
+                "default": 0,
+                "maximum": 180,
+                "minimum": -180,
+                "title": "Hue",
+                "type": "number"
+              },
+              "saturation": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Saturation",
+                "type": "number"
+              },
+              "luminance": {
+                "default": 0,
+                "maximum": 1,
+                "minimum": -1,
+                "title": "Luminance",
+                "type": "number"
+              }
+            },
+            "title": "HslChannel",
+            "type": "object"
+          },
+          "HslChannels": {
+            "additionalProperties": false,
+            "properties": {
+              "red": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "orange": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "yellow": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "green": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "cyan": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "blue": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "purple": {
+                "$ref": "#/$defs/HslChannel"
+              },
+              "magenta": {
+                "$ref": "#/$defs/HslChannel"
+              }
+            },
+            "title": "HslChannels",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "clip_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 40,
+            "minItems": 1,
+            "title": "Clip Ids",
+            "type": "array"
+          },
+          "adjustments": {
+            "$ref": "#/$defs/ColorGrade"
+          },
+          "replace": {
+            "default": false,
+            "title": "Replace",
+            "type": "boolean"
+          },
+          "preset_id": {
+            "anyOf": [
+              {
+                "enum": [
+                  "natural",
+                  "cream",
+                  "warm",
+                  "portrait",
+                  "soft_skin",
+                  "cool_portrait",
+                  "forest",
+                  "ocean",
+                  "autumn",
+                  "food",
+                  "coffee",
+                  "fresh",
+                  "teal_orange",
+                  "faded_film",
+                  "vintage",
+                  "cool",
+                  "neon",
+                  "monochrome"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset Id"
+          },
+          "intensity": {
+            "default": 1,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Intensity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "clip_ids",
+          "adjustments"
+        ],
+        "title": "GradeArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "copy_color_grade",
+      "description": "把指定片段的手动调色、滤镜及强度复制到其他片段；不是自动分析后的镜头匹配。",
+      "writes_draft": true,
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "source_clip_id": {
+            "title": "Source Clip Id",
+            "type": "string"
+          },
+          "target_clip_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 40,
+            "minItems": 1,
+            "title": "Target Clip Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_clip_id",
+          "target_clip_ids"
+        ],
+        "title": "CopyGradeArgs",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_cover",
+      "description": "设置可撤销封面：source=timeline 取成片 frame（30fps，含调色/文字/转场），或 source=image 使用项目图片 asset_id。可加标题、位置、字号、颜色及遮罩。cover=null 移除；不插入视频或修改视频时长，下载由用户点击导出封面。",
+      "writes_draft": true,
+      "parameters": {
+        "$defs": {
+          "Cover": {
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "default": "timeline",
+                "enum": [
+                  "timeline",
+                  "image"
+                ],
+                "title": "Source",
+                "type": "string"
+              },
+              "frame": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Frame",
+                "type": "integer"
+              },
+              "asset_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Asset Id"
+              },
+              "title": {
+                "default": "",
+                "maxLength": 120,
+                "title": "Title",
+                "type": "string"
+              },
+              "x": {
+                "default": 0.5,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "X",
+                "type": "number"
+              },
+              "y": {
+                "default": 0.75,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Y",
+                "type": "number"
+              },
+              "font_size": {
+                "default": 72,
+                "maximum": 240,
+                "minimum": 12,
+                "title": "Font Size",
+                "type": "number"
+              },
+              "color": {
+                "default": "#ffffff",
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "title": "Color",
+                "type": "string"
+              },
+              "shade": {
+                "default": 0.25,
+                "maximum": 1,
+                "minimum": 0,
+                "title": "Shade",
+                "type": "number"
+              },
+              "fit": {
+                "default": "cover",
+                "enum": [
+                  "cover",
+                  "contain"
+                ],
+                "title": "Fit",
+                "type": "string"
+              }
+            },
+            "title": "Cover",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Cover"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cover"
+        ],
+        "title": "CoverArgs",
         "type": "object"
       }
     },
@@ -1830,7 +3461,7 @@
     },
     {
       "name": "query_audio",
-      "description": "根据任意问题听取音频素材或视频原声。可选 start_ms/end_ms 为素材母版毫秒；回答和候选锚点是模型估计，仅查询，不改草稿。",
+      "description": "听取音频素材或视频原声。问风格、情绪、乐器等整体听感时 include_timestamps=false；寻找事件位置时为 true。可选 start_ms/end_ms 为素材母版毫秒；回答和锚点是模型估计，仅查询，不改草稿。",
       "writes_draft": false,
       "parameters": {
         "additionalProperties": false,
@@ -1859,6 +3490,18 @@
             ],
             "default": null,
             "title": "End Ms"
+          },
+          "include_timestamps": {
+            "default": true,
+            "description": "风格、情绪、乐器等整体听感问题设为 false；寻找声音发生位置时设为 true。",
+            "title": "Include Timestamps",
+            "type": "boolean"
+          },
+          "force_refresh": {
+            "default": false,
+            "description": "仅在用户明确要求重新听取或刷新分析时设为 true；默认复用同一素材与问题的结构化结果。",
+            "title": "Force Refresh",
+            "type": "boolean"
           },
           "asset_id": {
             "title": "Asset Id",

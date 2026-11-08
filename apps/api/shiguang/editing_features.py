@@ -112,7 +112,7 @@ class InspectArgs(AssetArgs):
     end_frame: int = Field(gt=0, strict=True)
 
 for name, args, description in [
-    ("query_audio", QueryAudioArgs, "根据任意问题听取音频素材或视频原声。可选 start_ms/end_ms 为素材母版毫秒；回答和候选锚点是模型估计，仅查询，不改草稿。"),
+    ("query_audio", QueryAudioArgs, "听取音频素材或视频原声。问风格、情绪、乐器等整体听感时 include_timestamps=false；寻找事件位置时为 true。可选 start_ms/end_ms 为素材母版毫秒；回答和锚点是模型估计，仅查询，不改草稿。"),
     ("search_segments", SearchArgs, "按画面描述、标签或对白关键词检索已分析片段；返回真实源帧区间，空词列出候选。"),
     ("get_asset_analysis", AssetArgs, "读取素材的视觉证据、对白时间戳和各阶段状态。"),
     ("analyze_asset", AnalyzeArgs, "通过已配置视觉/语音模型分析素材，缓存已完成阶段；调用可能耗时。"),

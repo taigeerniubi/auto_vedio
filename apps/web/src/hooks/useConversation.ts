@@ -1,4 +1,4 @@
-// 加载并维护按工程保存的历史对话、分页和刷新后的运行进度。
+// 加载并维护按工程与会话保存的历史对话、分页和刷新后的运行进度。
 import { useEffect, useRef, useState } from "react";
 import { api, projectPath } from "../api";
 import type { ConversationEntry, ConversationPage, Run } from "../contracts";
@@ -21,20 +21,26 @@ function merge(earlier: ConversationEntry[], current: ConversationEntry[]) {
 /** 提供工程隔离的历史记录读取和运行状态恢复。
  * Args:
  *   projectId: 当前工程编号。
+ *   sessionId: 当前聊天会话编号。
  *   report: 向页面报告读取错误。
  * Returns:
  *   历史记录、加载状态、分页与追加动作。
  */
 export function useConversation(
   projectId: string | undefined,
+  sessionId: string | undefined,
   report: (error: unknown) => void,
+  sessionsLoading = false,
 ) {
+  const key = `${projectId || ""}:${sessionId || ""}`;
   const [entries, setEntries] = useState<ConversationEntry[]>([]);
-  const [owner, setOwner] = useState(projectId);
+  const [owner, setOwner] = useState(key);
   const [cursor, setCursor] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const currentProject = useRef(projectId);
   currentProject.current = projectId;
+  const currentSession = useRef(sessionId);
+  currentSession.current = sessionId;
   const generation = useRef(0);
   const loadingOlder = useRef(false);
   const reporter = useRef(report);
@@ -42,16 +48,16 @@ export function useConversation(
 
   useEffect(() => {
     const version = ++generation.current;
-    setOwner(projectId);
+    setOwner(key);
     setEntries([]);
     setCursor(null);
     loadingOlder.current = false;
-    if (!projectId) {
+    if (!projectId || !sessionId) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    api<ConversationPage>(`${projectPath(projectId)}/runs`)
+    api<ConversationPage>(`${projectPath(projectId)}/runs?session_id=${encodeURIComponent(sessionId)}`)
       .then((page) => {
         if (generation.current !== version) return;
         setEntries((previous) => merge(page.items, previous));
@@ -66,7 +72,7 @@ export function useConversation(
     return () => {
       generation.current++;
     };
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   /** 将当前完成或失败的运行加入历史，避免下一次指令覆盖它。
    * Args:
@@ -75,6 +81,7 @@ export function useConversation(
    */
   function remember(run: Run, instruction: string) {
     if (run.project_id && run.project_id !== currentProject.current) return;
+    if (run.session_id && run.session_id !== currentSession.current) return;
     setEntries((previous) => {
       const entry = {
         ...run,
@@ -91,14 +98,14 @@ export function useConversation(
 
   /** 加载较早对话；切换项目后的旧请求不会写入新项目。 */
   async function loadOlder() {
-    if (!projectId || cursor === null || loadingOlder.current || loading)
+    if (!projectId || !sessionId || cursor === null || loadingOlder.current || loading)
       return;
     const version = generation.current;
     loadingOlder.current = true;
     setLoading(true);
     try {
       const page = await api<ConversationPage>(
-        `${projectPath(projectId)}/runs?before=${cursor}`,
+        `${projectPath(projectId)}/runs?session_id=${encodeURIComponent(sessionId)}&before=${cursor}`,
       );
       if (generation.current !== version) return;
       setEntries((previous) => merge(page.items, previous));
@@ -119,7 +126,7 @@ export function useConversation(
     .map((entry) => entry.run_id)
     .join(",");
   useEffect(() => {
-    if (!projectId || !runningIds) return;
+    if (!projectId || !sessionId || !runningIds) return;
     let cancelled = false,
       polling = false;
     const timer = window.setInterval(async () => {
@@ -131,7 +138,7 @@ export function useConversation(
             .split(",")
             .map((id) => api<Run>(`${projectPath(projectId)}/runs/${id}`)),
         );
-        if (!cancelled && currentProject.current === projectId)
+        if (!cancelled && currentProject.current === projectId && currentSession.current === sessionId)
           setEntries((previous) =>
             previous.map((entry) => {
               const update = updates.find((run) => run.run_id === entry.run_id);
@@ -148,12 +155,13 @@ export function useConversation(
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [projectId, runningIds]);
+  }, [projectId, sessionId, runningIds]);
 
   return {
-    entries: owner === projectId ? entries : [],
-    loading,
-    hasMore: owner === projectId && cursor !== null,
+    entries: owner === key ? entries : [],
+    loading: sessionsLoading || loading || owner !== key,
+    ready: !!projectId && !sessionsLoading && owner === key && !loading,
+    hasMore: owner === key && cursor !== null,
     loadOlder,
     remember,
   };

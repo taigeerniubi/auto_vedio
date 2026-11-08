@@ -1,10 +1,11 @@
 // 展示智能体指令、真实执行进度、结果与可恢复的失败信息。
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Editor } from "../hooks/useEditor";
 import { Button, Icon } from "./Ui";
 import { Conversation } from "./Conversation";
 import { VoiceInput } from "./VoiceInput";
 import { Inspector } from "./Inspector";
+import { ChatSessions } from "./ChatSessions";
 
 /** 渲染自然语言编辑入口及运行反馈。
  * Args:
@@ -25,13 +26,17 @@ export function AgentPanel({
   const [text, setText] = useState("");
   const [tab, setTab] = useState<"agent" | "inspector">("agent");
   const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => setText(""), [e.project?.project_id, e.chatSessions.sessionId, e.chatSessions.draftKey]);
   const selected = e.project?.snapshot.clips.find(
     (c) => c.clip_id === e.selected,
   );
   const name = e.assets.find((a) => a.asset_id === selected?.asset_id)?.name;
   const active = !!e.busy && e.busy === "AI 正在编辑";
+  const latestRun = e.run || e.conversation.entries.at(-1);
+  const canUndo = !e.busy && e.conversation.ready && latestRun?.status === "completed" &&
+    latestRun.result.changed !== false && latestRun.result.revision === e.project?.revision;
   const submit = () => {
-    if (!text.trim() || e.busy || !e.project || !e.model?.configured) return;
+    if (!text.trim() || e.busy || !e.project || !e.model?.configured || !e.conversation.ready) return;
     void e.command(text.trim(), () => setText(""));
   };
   return (
@@ -90,6 +95,7 @@ export function AgentPanel({
           <Inspector editor={e} />
         ) : (
           <div className="agent-panel">
+            <ChatSessions editor={e} />
             <Conversation
               editor={e}
               onSuggest={(value) => {
@@ -98,6 +104,18 @@ export function AgentPanel({
               }}
             />
             <div className="composer-dock">
+              {latestRun?.status === "completed" && (
+                <div className="composer-actions">
+                  <Button
+                    icon="undo"
+                    disabled={!canUndo}
+                    title="撤销最近一次 AI 更改"
+                    onClick={() => void e.history("undo")}
+                  >
+                    撤销更改
+                  </Button>
+                </div>
+              )}
               <form
                 className="composer"
                 onSubmit={(event) => {
@@ -118,7 +136,7 @@ export function AgentPanel({
                   placeholder="告诉我，你想怎么剪…"
                   rows={2}
                   maxLength={8000}
-                  disabled={!!e.busy || !e.project}
+                  disabled={!!e.busy || !e.project || !e.conversation.ready}
                   onKeyDown={(event) => {
                     if (
                       event.nativeEvent.isComposing ||
@@ -157,6 +175,7 @@ export function AgentPanel({
                         !text.trim() ||
                         !!e.busy ||
                         !e.project ||
+                        !e.conversation.ready ||
                         !e.model?.configured
                       }
                     />

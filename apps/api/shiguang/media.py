@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from queue import Empty, Queue
+from threading import Thread
+from time import monotonic
 import wave
 
 import imageio_ffmpeg
@@ -89,17 +92,23 @@ def import_media(store, pid, relative_path, database=DATABASE):
         ffmpeg("-i", src, "-frames:v", 1, output)
     elif kind == "video":
         ffmpeg("-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-vf", "fps=30,setpts=PTS-STARTPTS,scale=trunc(iw/2)*2:trunc(ih/2)*2",
-               "-af", "aresample=48000,asetpts=PTS-STARTPTS", "-c:v", "libx264", "-preset", "fast", "-crf", 18,
+               "-af", "aresample=48000,asetpts=PTS-STARTPTS", "-c:v", "libx264", "-preset", "veryfast", "-crf", 18,
                "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", 48000, "-movflags", "+faststart", output)
     else:
         ffmpeg("-i", src, "-vn", "-ar", 48000, "-ac", 2, "-c:a", "pcm_s16le", output)
-    master = probe(output, count=True)
+    # 自行生成的 MP4 已记录准确帧数；避免导入时为计数再完整解码一次。
+    master = probe(output)
     v = next((s for s in master["streams"] if s["codec_type"] == "video"), None)
+    frames = v.get("nb_frames") if v else None
+    if kind == "video" and (not str(frames).isdigit() or int(frames) <= 0):
+        master = probe(output, count=True)
+        v = next(s for s in master["streams"] if s["codec_type"] == "video")
+        frames = v["nb_read_frames"]
     with output.open("rb") as source:
         digest = file_digest(source, "sha256").hexdigest()
     asset = Asset(asset_id=aid, project_id=pid, kind=kind, name=src.name, path=str(output.resolve()),
                   sha256=digest, width=v["width"] if v else 0, height=v["height"] if v else 0,
-                  total_frames=(int(v["nb_read_frames"]) if kind == "video" else math.floor(float(master["format"].get("duration", 0)) * 30)),
+                  total_frames=(int(frames) if kind == "video" else math.floor(float(master["format"].get("duration", 0)) * 30)),
                   has_audio=any(s["codec_type"] == "audio" for s in master["streams"]))
     store.add_asset(asset)
     return asset
@@ -265,7 +274,137 @@ def prepare_render(snapshot: Snapshot, assets: dict[str, Asset], public_dir: Pat
     return plan, warnings
 
 
-def render_snapshot(snapshot, assets, output: Path, work: Path | None = None):
+def _export_scale(snapshot, resolution):
+    """按标准档位缩放并限制最长边，避免窄画布产生超大输出。"""
+    width, height = snapshot.composition.width, snapshot.composition.height
+    bounds = {"720p": (720, 1280), "1080p": (1080, 1920), "2160p": (2160, 3840)}
+    if resolution == "source":
+        return 1
+    if resolution not in bounds:
+        raise ToolError("INVALID_EXPORT_OPTIONS", "不支持的导出分辨率")
+    short, long = bounds[resolution]
+    return min(short / min(width, height), long / max(width, height))
+
+
+def export_dimensions(snapshot, resolution="source"):
+    """按档位选择输出尺寸，保持画幅与画布中的文字、构图比例。"""
+    width, height = snapshot.composition.width, snapshot.composition.height
+    scale = _export_scale(snapshot, resolution)
+    # 与 Remotion 的 H.264 偶数尺寸规则一致；不修改正式工程的画布。
+    def scaled_even(value):
+        while math.floor(value * scale + .5) % 2:
+            value -= 1
+        return math.floor(value * scale + .5)
+    return scaled_even(width), scaled_even(height)
+
+
+def prepare_export(snapshot, assets, public_dir):
+    """复用已缓存混音、倒放和素材母版，不为普通剪切重复转码视频。"""
+    from .preview import cached_resource, prepare_preview
+    errors = validate_snapshot(snapshot, assets)
+    if errors:
+        raise ToolError("INVALID_DRAFT", "; ".join(errors))
+    if not snapshot.clips:
+        raise ToolError("EMPTY_TIMELINE", "空工程不能渲染")
+    pid = assets[snapshot.clips[0].asset_id].project_id
+    plan, warnings = prepare_preview(pid, snapshot, assets)
+    public_dir.mkdir(parents=True, exist_ok=True)
+
+    def cached_path(url):
+        prefix = f"/api/v1/projects/{pid}/previews/"
+        parts = url.removeprefix(prefix).split("/")
+        if not url.startswith(prefix) or len(parts) != 3 or parts[1] != "files":
+            raise ToolError("INVALID_RENDER_RESOURCE", "渲染缓存地址无效")
+        root = ARTIFACTS / "previews" / pid
+        return contained(root / parts[0] / parts[2], root)
+
+    def publish(source, name):
+        dest = public_dir / name
+        if not dest.exists():
+            try:
+                os.link(source, dest)
+            except OSError:
+                shutil.copyfile(source, dest)
+        return name
+
+    for clip, source_clip in zip(plan["clips"], snapshot.clips):
+        asset = assets[clip["asset_id"]]
+        # 非整数变速必须保留编辑内核的 floor 帧映射，不能交给播放器自行舍入。
+        if not clip["reverse"] and source_clip.rate_num != source_clip.rate_den:
+            key = {"version": 1, "sha256": asset.sha256, "asset_id": asset.asset_id,
+                   **source_clip.model_dump(include={"source_in_frame", "source_out_frame", "rate_num", "rate_den", "reverse"})}
+            def retime(folder):
+                derive_video(source_clip, asset, folder / "retimed.mp4")
+                return []
+            clip["file"], _ = cached_resource(pid, key, "retimed.mp4", retime)
+            clip["previewPlayback"] = {"trimBefore": 0, "playbackRate": 1}
+        derived = clip["reverse"] or source_clip.rate_num != source_clip.rate_den
+        source = cached_path(clip["file"]) if derived else contained(asset.path, DATABASE)
+        name = f"derived-{source.parent.name}.mp4" if derived else f"asset-{asset.asset_id}-{asset.sha256[:16]}{source.suffix}"
+        clip["file"] = publish(source, name)
+    mix = cached_path(plan["mix_file"])
+    plan["mix_file"] = publish(mix, f"mix-{mix.parent.name}.wav")
+    return plan, warnings
+
+
+def _render_process(argv, on_progress, timeout, stderr_path):
+    """读取渲染器的逐行进度，并在失败或超时后终止整个子进程树。"""
+    queue = Queue()
+    process = None
+    reader = None
+    with stderr_path.open("wb") as err:
+        try:
+            process = subprocess.Popen([str(a) for a in argv], stdout=subprocess.PIPE, stderr=err,
+                                       text=True, encoding="utf-8", errors="replace", shell=False,
+                                       **({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}))
+            def read_lines():
+                try:
+                    for line in process.stdout:
+                        queue.put(line)
+                finally:
+                    queue.put(None)
+            reader = Thread(target=read_lines, daemon=True)
+            reader.start()
+            deadline = monotonic() + timeout
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise ToolError("MEDIA_TIMEOUT", f"媒体渲染超时：{timeout} 秒")
+                try:
+                    line = queue.get(timeout=min(.5, remaining))
+                except Empty:
+                    continue
+                if line is None:
+                    break
+                try:
+                    event = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(event, dict) and event.get("event") == "render_progress":
+                    on_progress({key: value for key, value in event.items() if key != "event"})
+            try:
+                code = process.wait(timeout=max(.1, deadline - monotonic()))
+            except subprocess.TimeoutExpired as exc:
+                raise ToolError("MEDIA_TIMEOUT", f"媒体渲染超时：{timeout} 秒") from exc
+            if code:
+                err.flush()
+                raise ToolError("MEDIA_PROCESS_FAILED", stderr_path.read_text(encoding="utf-8", errors="replace")[-5000:])
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    if os.name == "nt":
+                        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, timeout=15, check=False)
+                    else:
+                        import signal
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=15)
+                if reader is not None:
+                    reader.join(timeout=1)
+                process.stdout.close()
+
+
+def render_snapshot(snapshot, assets, output: Path, work: Path | None = None, *,
+                    resolution="source", quality="high", on_progress=None):
     """渲染工程并在解码验收通过后发布输出文件。
 
     Args:
@@ -273,28 +412,49 @@ def render_snapshot(snapshot, assets, output: Path, work: Path | None = None):
         assets: 项目素材映射。
         output: 最终视频路径。
         work: 可选的中间文件目录。
+        resolution: 原画布或按短边选择的输出分辨率。
+        quality: 画质档位，标准、高质量或节省空间。
+        on_progress: 接收阶段和百分比的可选回调。
 
     Returns:
         输出路径、帧数和媒体校验信息。
     """
+    if quality not in {"standard", "high", "compact"}:
+        raise ToolError("INVALID_EXPORT_OPTIONS", "不支持的导出画质")
+    width, height = export_dimensions(snapshot, resolution)
+    total = timeline(snapshot)[1]
+    notify = on_progress or (lambda value: None)
+    def progress(stage, percent, rendered=0):
+        notify({"stage": stage, "progress": percent, "rendered_frames": rendered, "total_frames": total})
     output = contained(output, ARTIFACTS)
     output.parent.mkdir(parents=True, exist_ok=True)
     work = work or ROOT / ".cache" / "render" / uid("job")
-    plan, warnings = prepare_render(snapshot, assets, work / "public", "render")
+    progress("preparing", 1)
+    plan, warnings = prepare_export(snapshot, assets, work / "public")
+    scale = _export_scale(snapshot, resolution)
+    plan["export_settings"] = {"scale": scale, "quality": quality}
     manifest = work / "manifest.json"
     manifest.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
     silent = work / "silent.mp4"
     node = shutil.which("node")
-    run([node, ROOT / "node_modules/tsx/dist/cli.mjs", ROOT / "apps/renderer/render.ts", manifest, silent], timeout=600)
+    if not node:
+        raise ToolError("RENDERER_UNAVAILABLE", "未找到 Node.js，无法启动视频渲染器")
+    progress("bundling", 12)
+    _render_process([node, ROOT / "node_modules/tsx/dist/cli.mjs", ROOT / "apps/renderer/render.ts", manifest, silent],
+                    notify, timeout=3600, stderr_path=work / "renderer.stderr.log")
     temp = output.with_name(output.stem + ".pending.mp4")
     try:
+        progress("muxing", 92, total)
         ffmpeg("-i", silent, "-i", work / "public" / plan["mix_file"], "-map", "0:v:0", "-map", "1:a:0",
                "-c:v", "copy", "-c:a", "aac", "-ar", 48000, "-t", plan["total_frames"] / 30, "-movflags", "+faststart", temp)
-        verify_output(temp, plan["total_frames"], snapshot.composition.width, snapshot.composition.height)
+        progress("verifying", 96, total)
+        verify_output(temp, plan["total_frames"], width, height)
         temp.replace(output)
     finally:
         temp.unlink(missing_ok=True)
-    return {"output": str(output), "frames": plan["total_frames"], "warnings": warnings}
+    progress("completed", 100, total)
+    return {"output": str(output), "frames": plan["total_frames"], "warnings": warnings,
+            "width": width, "height": height, "fps": 30, "bytes": output.stat().st_size}
 
 
 def verify_output(path, frames, width, height):

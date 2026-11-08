@@ -1,6 +1,6 @@
 // 提供片段裁切、播放、构图、运镜和音量的属性编辑面板。
 import type { Editor } from "../hooks/useEditor";
-import { duration } from "../timeline";
+import { anchorRange, duration, timecode } from "../timeline";
 import { Button, Icon } from "./Ui";
 import { thumbnailUrl } from "../api";
 
@@ -13,19 +13,21 @@ import { thumbnailUrl } from "../api";
 export function Inspector({ editor: e }: { editor: Editor }) {
   const snapshot = e.project?.snapshot;
   const clip = snapshot?.clips.find((c) => c.clip_id === e.selected);
+  const audio = snapshot?.audio_items.find(item => item.audio_id === e.selected);
   const disabled = !!e.busy;
   const asset = e.assets.find((a) => a.asset_id === clip?.asset_id);
   const index =
     snapshot?.clips.findIndex((c) => c.clip_id === clip?.clip_id) ?? -1;
   return (
     <div className="inspector scroll-panel">
-      {!clip ? (
+      {!clip && !audio && (
         <div className="empty-small">
           <Icon name="sliders" />
           <p>选择一个片段</p>
-          <span>点击时间线上的画面，即可调整时长、构图和声音。</span>
+          <span>点击时间线上的画面或音频查看属性；选中后按 Delete 移除。</span>
         </div>
-      ) : (
+      )}
+      {clip && (
         <div
           key={`${clip.clip_id}-${e.project!.revision}-${e.liveDraft?.seq ?? 0}`}
         >
@@ -178,7 +180,11 @@ export function Inspector({ editor: e }: { editor: Editor }) {
                     ...clip.transform,
                     fit: values.get("fit"),
                     scale: Number(values.get("scale")),
+                    scale_x: Number(values.get("scale_x")),
+                    scale_y: Number(values.get("scale_y")),
                     rotation_deg: Number(values.get("rotation")),
+                    position_x: Number(values.get("position_x")),
+                    position_y: Number(values.get("position_y")),
                   },
                 });
               }}
@@ -197,7 +203,7 @@ export function Inspector({ editor: e }: { editor: Editor }) {
                     name="scale"
                     aria-label="画面缩放"
                     type="number"
-                    min="1"
+                    min="0.1"
                     max="4"
                     step="0.05"
                     defaultValue={clip.transform.scale}
@@ -214,6 +220,10 @@ export function Inspector({ editor: e }: { editor: Editor }) {
                     defaultValue={clip.transform.rotation_deg}
                   />
                 </label>
+                <label>水平位置<input name="position_x" aria-label="画面水平位置" type="number" min="-2" max="2" step="0.01" defaultValue={clip.transform.position_x||0}/></label>
+                <label>宽度拉伸 / 倍<input name="scale_x" aria-label="画面宽度拉伸" type="number" min="0.1" max="4" step="0.05" defaultValue={clip.transform.scale_x ?? 1}/></label>
+                <label>高度拉伸 / 倍<input name="scale_y" aria-label="画面高度拉伸" type="number" min="0.1" max="4" step="0.05" defaultValue={clip.transform.scale_y ?? 1}/></label>
+                <label>垂直位置<input name="position_y" aria-label="画面垂直位置" type="number" min="-2" max="2" step="0.01" defaultValue={clip.transform.position_y||0}/></label>
               </div>
               <Button type="submit" disabled={disabled}>
                 应用构图
@@ -311,8 +321,8 @@ export function Inspector({ editor: e }: { editor: Editor }) {
       )}
       {!!snapshot?.audio_items.length && (
         <section>
-          <h4>时间线配乐</h4>
-          {snapshot.audio_items.map((item) => (
+          <h4>{audio ? "选中音频" : "时间线配乐"}</h4>
+          {(audio ? [audio] : snapshot.audio_items).map((item) => (
             <form
               key={`${item.audio_id}-${e.project!.revision}`}
               className="music-editor"
@@ -328,6 +338,7 @@ export function Inspector({ editor: e }: { editor: Editor }) {
               }}
             >
               <p>{e.assets.find((a) => a.asset_id === item.asset_id)?.name}</p>
+              <p>{anchorRange(item.anchor, snapshot).map(timecode).join(" – ")}</p>
               <label>
                 音量 / dB
                 <input

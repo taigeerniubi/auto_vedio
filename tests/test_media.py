@@ -7,6 +7,36 @@ import pytest
 
 from shiguang.api import create_app
 from shiguang.media import ARTIFACTS, DATABASE, probe, verify_output
+from shiguang import media
+from shiguang.store import Store
+
+
+@pytest.mark.media
+@pytest.mark.parametrize("count_missing", [False, True])
+def test_import_preserves_frame_count_without_redecoding_when_metadata_exists(tmp_path, monkeypatch, count_missing):
+    """元数据有帧数时直接使用，缺失时回退；两种路径均与真实解码一致。"""
+    source = tmp_path / "source.mp4"
+    media.ffmpeg("-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=1",
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p", source)
+    original_probe = media.probe
+    calls = []
+
+    def observed_probe(path, count=False):
+        calls.append((Path(path).name, count))
+        result = original_probe(path, count=count)
+        if count_missing and Path(path).name == "master.mp4" and not count:
+            result["streams"][0]["nb_frames"] = "N/A"
+        return result
+
+    monkeypatch.setattr(media, "probe", observed_probe)
+    store = Store(tmp_path / "state.sqlite3")
+    pid = store.create_project("Import frame verification")["project_id"]
+    asset = media.import_media(store, pid, source.name, tmp_path)
+    video = next(s for s in original_probe(asset.path, count=True)["streams"] if s["codec_type"] == "video")
+    assert asset.total_frames == int(video["nb_read_frames"]) == 30
+    assert video["codec_name"] == "h264" and video["pix_fmt"] == "yuv420p"
+    assert video["r_frame_rate"] == "30/1"
+    assert (("master.mp4", True) in calls) == count_missing
 
 
 @pytest.mark.media

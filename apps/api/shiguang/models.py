@@ -5,11 +5,20 @@ from math import ceil, isfinite
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from .color_models import ColorGrade, ColorPreset
 
 Frame = Annotated[StrictInt, Field(ge=0)]
 PositiveFrame = Annotated[StrictInt, Field(gt=0)]
 Unit = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Gain = Annotated[float, Field(ge=-60, le=12, allow_inf_nan=False)]
+TransitionPreset = Literal[
+    "dissolve", "slide_left", "slide_right", "slide_up", "slide_down",
+    "wipe_left", "wipe_right", "wipe_up", "wipe_down", "fade_black", "fade_white", "iris_open",
+    "flip_left", "flip_right", "flip_up", "flip_down",
+    "cube_left", "cube_right", "cube_up", "cube_down", "clock_wipe", "push_cut",
+    "cross_zoom", "blur_slide_left", "blur_slide_right", "blur_slide_up", "blur_slide_down",
+    "film_burn", "glitch",
+]
 
 
 class Model(BaseModel):
@@ -42,8 +51,12 @@ class Transform(Model):
     fit: Literal["cover", "contain"] = "cover"
     anchor_x: Unit = 0.5
     anchor_y: Unit = 0.5
-    scale: Annotated[float, Field(ge=1, le=4)] = 1
+    scale: Annotated[float, Field(ge=0.1, le=4)] = 1
+    scale_x: Annotated[float, Field(ge=0.1, le=4)] = 1
+    scale_y: Annotated[float, Field(ge=0.1, le=4)] = 1
     rotation_deg: Annotated[float, Field(ge=-15, le=15)] = 0
+    position_x: Annotated[float, Field(ge=-2, le=2)] = 0
+    position_y: Annotated[float, Field(ge=-2, le=2)] = 0
 
 
 class Motion(Model):
@@ -70,7 +83,9 @@ class Clip(Model):
     original_audio_gain_db: Gain = 0
     transform: Transform = Field(default_factory=Transform)
     motion: Motion | None = None
-    color_preset: Literal["warm", "cool", "monochrome"] | None = None
+    color_preset: ColorPreset | None = None
+    color_preset_intensity: Unit = 1
+    color_grade: ColorGrade = Field(default_factory=ColorGrade)
     derived_from_clip_id: str | None = None
 
     @property
@@ -83,7 +98,7 @@ class Clip(Model):
 class Transition(Model):
     left_clip_id: str
     right_clip_id: str
-    preset_id: Literal["dissolve"] = "dissolve"
+    preset_id: TransitionPreset = "dissolve"
     preset_version: Literal[1] = 1
     duration_frames: PositiveFrame
 
@@ -124,6 +139,19 @@ class AudioItem(Model):
     ducks: list[Duck] = Field(default_factory=list)
 
 
+class Cover(Model):
+    source: Literal["timeline", "image"] = "timeline"
+    frame: Frame = 0
+    asset_id: str | None = None
+    title: str = Field(default="", max_length=120)
+    x: Unit = 0.5
+    y: Unit = 0.75
+    font_size: Annotated[float, Field(ge=12, le=240)] = 72
+    color: str = Field(default="#ffffff", pattern=r"^#[0-9a-fA-F]{6}$")
+    shade: Unit = 0.25
+    fit: Literal["cover", "contain"] = "cover"
+
+
 class Snapshot(Model):
     schema_version: Literal[1] = 1
     removed_asset_ids: list[str] = Field(default_factory=list)
@@ -132,6 +160,7 @@ class Snapshot(Model):
     transitions: list[Transition] = Field(default_factory=list)
     text_items: list[TextItem] = Field(default_factory=list)
     audio_items: list[AudioItem] = Field(default_factory=list)
+    cover: Cover | None = None
 
 
 class Asset(Model):
@@ -241,6 +270,11 @@ def validate_snapshot(s: Snapshot, assets: dict[str, Asset]) -> list[str]:
             if c.transform.fit != "cover":
                 errors.append(f"MOTION_REQUIRES_COVER:{c.clip_id}")
     _, total = timeline(s)
+    if s.cover:
+        if s.cover.source == "timeline" and (s.cover.frame >= total or s.cover.asset_id is not None):
+            errors.append("COVER_FRAME_BOUNDS")
+        if s.cover.source == "image" and (s.cover.asset_id not in assets or assets[s.cover.asset_id].kind != "image"):
+            errors.append("INVALID_COVER_IMAGE")
     for item in [*s.text_items, *s.audio_items]:
         anchor = item.anchor
         if anchor.kind == "clip":

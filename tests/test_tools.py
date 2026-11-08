@@ -16,7 +16,7 @@ def initialize(context, clips=None):
 
 
 def test_all_tools_have_typed_schema():
-    assert len(TOOLS) == 34
+    assert len(TOOLS) == 37
     for tool in TOOLS.values():
         assert tool.arguments.model_json_schema()["additionalProperties"] is False
 
@@ -68,6 +68,54 @@ def test_audio_tools_and_delete_cascade(context):
     s = store.draft(did)["snapshot"]
     assert not s["text_items"] and not s["audio_items"][0]["ducks"]
     assert call(store, did, "remove_audio", {"audio_id": aid})["ok"]
+
+
+@pytest.mark.parametrize("deleted_id", ["c1", "c2", "c3"])
+def test_delete_clip_clamps_timeline_effects_and_undo_restores_everything(context, deleted_id):
+    store, pid, did = initialize(context, [clip("c1"), clip("c2", "b"), clip("c3")])
+    for left, right, frames in [("c1", "c2", 10), ("c2", "c3", 15)]:
+        assert call(store, did, "set_transition", {
+            "left_clip_id": left, "right_clip_id": right, "duration_frames": frames,
+        })["ok"]
+    total = timeline(Snapshot.model_validate(store.draft(did)["snapshot"]))[1]
+    music_id = call(store, did, "add_audio", {
+        "asset_id": "music", "anchor": {"end_frame": total}, "source_in_frame": 20,
+    })["changed_ids"][0]
+    assert call(store, did, "set_audio_fade", {
+        "audio_id": music_id, "fade_in_frames": 100, "fade_out_frames": total - 100,
+    })["ok"]
+    assert call(store, did, "duck_music_for_clip", {"audio_id": music_id, "clip_id": deleted_id})["ok"]
+    for anchor in [{"start_frame": total - 10, "end_frame": total},
+                   {"kind": "clip", "clip_id": deleted_id, "end_frame": 60}]:
+        assert call(store, did, "add_audio", {"asset_id": "music", "anchor": anchor})["ok"]
+        assert call(store, did, "add_text", {"text": "removed", "anchor": anchor})["ok"]
+    assert call(store, did, "add_text", {"text": "kept", "anchor": {"end_frame": total}})["ok"]
+    before = store.commit(did)["snapshot"]
+    did = store.create_draft(pid)["id"]
+
+    result = call(store, did, "delete_clip", {"clip_id": deleted_id})
+    assert result["ok"], result
+    after = store.commit(did)
+    new_total = timeline(Snapshot.model_validate(after["snapshot"]))[1]
+    audio = after["snapshot"]["audio_items"]
+    assert len(audio) == 1 and audio[0]["audio_id"] == music_id
+    assert audio[0]["anchor"]["end_frame"] == new_total
+    assert audio[0]["source_in_frame"] == 20
+    assert audio[0]["fade_in_frames"] + audio[0]["fade_out_frames"] == new_total
+    assert audio[0]["ducks"] == []
+    assert len(after["snapshot"]["text_items"]) == 1
+    assert after["snapshot"]["text_items"][0]["anchor"]["end_frame"] == new_total
+    assert store.history(pid, "undo", after["revision"])["snapshot"] == before
+
+
+def test_delete_last_clip_clears_timeline_audio_and_text(context):
+    store, _, did = initialize(context, [clip()])
+    assert call(store, did, "add_audio", {"asset_id": "music", "anchor": {"end_frame": 60}})["ok"]
+    assert call(store, did, "add_text", {"text": "title", "anchor": {"end_frame": 60}})["ok"]
+    result = call(store, did, "delete_clip", {"clip_id": "c1"})
+    assert result["ok"], result
+    snapshot = store.draft(did)["snapshot"]
+    assert snapshot["clips"] == snapshot["audio_items"] == snapshot["text_items"] == []
 
 
 @pytest.mark.parametrize("name,args", [

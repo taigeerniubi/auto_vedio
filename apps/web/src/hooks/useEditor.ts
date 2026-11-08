@@ -7,12 +7,16 @@ import type {
   ProjectInfo,
   ModelStatus,
   Run,
-  ExportResult,
   Analysis,
   PerceptionStatus,
+  LibraryFile,
+  Savepoint,
 } from "../contracts";
+import { formatSavepointTime } from "../projectTime";
 import { layout } from "../timeline";
 import { useConversation } from "./useConversation";
+import { useChatSessions } from "./useChatSessions";
+import { useExport } from "./useExport";
 
 /** 维护工作台状态，并把每次手动编辑提交为可撤销版本。
  * Returns:
@@ -20,6 +24,8 @@ import { useConversation } from "./useConversation";
  */
 export function useEditor() {
   const [project, setProject] = useState<Project | null>(null);
+  // 工程数据刷新不算重新打开；显式重开同一工程也需要一个新的会话。
+  const [projectOpening, setProjectOpening] = useState({ version: 0, created: false });
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [model, setModel] = useState<ModelStatus | null>(null);
@@ -28,7 +34,9 @@ export function useEditor() {
   const [selected, setSelected] = useState("");
   const [run, setRun] = useState<Run | null>(null);
   const [instruction, setInstruction] = useState("");
-  const [exported, setExported] = useState<ExportResult | null>(null);
+  const [savepointNotice, setSavepointNotice] = useState("");
+  useEffect(() => setSavepointNotice(""), [project?.project_id]);
+  const exportState = useExport(project);
   const [analyses, setAnalyses] = useState<Record<string, Analysis>>({});
   const [perception, setPerception] = useState<PerceptionStatus | null>(null);
   const playhead = useRef(0);
@@ -42,13 +50,20 @@ export function useEditor() {
         ? err
         : new ApiError(err instanceof Error ? err.message : "操作未完成"),
     );
-  const conversation = useConversation(project?.project_id, report);
+  const chatSessions = useChatSessions(project?.project_id, projectOpening, report);
+  const conversation = useConversation(project?.project_id, chatSessions.sessionId, report, chatSessions.loading);
   const restoredRun = [...conversation.entries].reverse().find(
     entry => entry.status === "running" && entry.run_id !== run?.run_id,
   );
   const activeRun = run?.status === "running" ? run : restoredRun;
   const liveDraft = activeRun?.live_draft?.base === project?.revision ? activeRun?.live_draft : null;
   const visibleProject = project && liveDraft ? { ...project, snapshot: liveDraft.snapshot } : project;
+  // 草稿中的切分、删除和回滚都会改变对象编号，失效选区不应在旧快照中重新出现。
+  useEffect(() => {
+    const snapshot = visibleProject?.snapshot;
+    setSelected(old => snapshot?.clips.some(clip => clip.clip_id === old) ||
+      snapshot?.audio_items.some(item => item.audio_id === old) ? old : "");
+  }, [visibleProject?.snapshot]);
   const restoredRevision = conversation.entries.at(-1)?.result?.revision;
   useEffect(() => {
     if (project && !lock.current && restoredRevision !== undefined && restoredRevision > project.revision)
@@ -58,10 +73,11 @@ export function useEditor() {
   /** 重新读取工程和素材，保持浏览器与正式版本一致。
    * Args:
    *   pid: 工程编号。
+   *   opening: 是否通过工程列表显式打开。
    * Returns:
    *   当前工程。
    */
-  async function refresh(pid: string) {
+  async function refresh(pid: string, opening = false) {
     const request = ++refreshId.current;
     const [next, media, analysis] = await Promise.all([
       api<Project>(projectPath(pid)),
@@ -69,11 +85,18 @@ export function useEditor() {
       api<Record<string, Analysis>>(`${projectPath(pid)}/analyses`),
     ]);
     if (alive.current && request === refreshId.current) {
+      if (opening)
+        setProjectOpening((previous) => ({ version: previous.version + 1, created: false }));
       setProject(next);
+      setProjects(previous => previous.map(item => item.project_id === pid ? {
+        ...item, name: next.name, revision: next.revision, last_savepoint: next.last_savepoint,
+      } : item));
       setAssets(media);
       setAnalyses(analysis);
       setSelected((old) =>
-        next.snapshot.clips.some((c) => c.clip_id === old) ? old : "",
+        next.snapshot.clips.some((c) => c.clip_id === old) ||
+        next.snapshot.audio_items.some((item) => item.audio_id === old)
+          ? old : "",
       );
     }
     return next;
@@ -91,6 +114,7 @@ export function useEditor() {
     lock.current = true;
     setBusy(label);
     setError(null);
+    setSavepointNotice("");
     try {
       await work();
       return true;
@@ -118,6 +142,7 @@ export function useEditor() {
         const saved = localStorage.getItem("shiguang-project");
         if (saved && list.some((p) => p.project_id === saved))
           refresh(saved).catch(report);
+        else if (saved) localStorage.removeItem("shiguang-project");
       })
       .catch(report);
     return () => {
@@ -131,7 +156,7 @@ export function useEditor() {
    *   vertical: 是否使用竖屏画布。
    */
   async function create(name: string, vertical: boolean) {
-    await task("创建工程", async () => {
+    return task("创建工程", async () => {
       refreshId.current++;
       const next = await post<Project>("/api/v1/projects", {
         name: name.trim(),
@@ -141,13 +166,13 @@ export function useEditor() {
         },
       });
       next.name = name.trim();
+      setProjectOpening((previous) => ({ version: previous.version + 1, created: true }));
       setProject(next);
       setAssets([]);
       setAnalyses({});
       setSelected("");
       setRun(null);
       setInstruction("");
-      setExported(null);
       localStorage.setItem("shiguang-project", next.project_id);
       setProjects(await api<ProjectInfo[]>("/api/v1/projects"));
     });
@@ -159,12 +184,87 @@ export function useEditor() {
    */
   const open = (pid: string) =>
     task("读取工程", async () => {
-      await refresh(pid);
+      await refresh(pid, true);
       localStorage.setItem("shiguang-project", pid);
       setRun(null);
       setInstruction("");
-      setExported(null);
     });
+
+  /** 打开项目菜单时读取最新列表，确认删除使用当前版本。 */
+  const refreshProjects = () => task("读取项目列表", async () => {
+    setProjects(await api<ProjectInfo[]>("/api/v1/projects"));
+  });
+
+  /** 显式暂存只标记已应用的工程快照，自动编辑不会更新暂存时间。 */
+  const savepoint = () => project && task("正在暂存", async () => {
+    try {
+      const saved = await post<Savepoint>(`${projectPath(project.project_id)}/savepoints`, {
+        expected_revision: project.revision, request_id: crypto.randomUUID(),
+      });
+      await refresh(project.project_id);
+      setSavepointNotice(`已暂存于 ${formatSavepointTime(saved.created_at)}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "REVISION_CONFLICT") await refresh(project.project_id);
+      throw err;
+    }
+  });
+
+  /** 恢复暂存作为可撤销的一次编辑，已导入素材和聊天记录继续保留。 */
+  const restoreSavepoint = (saved: Savepoint) => project && task("正在恢复暂存", async () => {
+    try {
+      const result = await post<{changed: boolean}>(`${projectPath(project.project_id)}/savepoints/${encodeURIComponent(saved.savepoint_id)}/restore`, {
+        expected_revision: project.revision,
+      });
+      await refresh(project.project_id);
+      setSavepointNotice(result.changed ? `已恢复到 ${formatSavepointTime(saved.created_at)} 的暂存，可撤销这次恢复。` : "当前剪辑已与该暂存一致。");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "REVISION_CONFLICT") await refresh(project.project_id);
+      throw err;
+    }
+  });
+
+  const removeSavepoint = (id: string) => project && task("正在删除暂存", async () => {
+    await api(`${projectPath(project.project_id)}/savepoints/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refresh(project.project_id);
+    setSavepointNotice("已删除这条暂存，当前剪辑保持不变。");
+  });
+
+  /** 删除指定工程；当前工程删除后清空工作台和刷新时的恢复入口。 */
+  const deleteProject = (pid: string, expectedRevision: number) => task("正在删除项目", async () => {
+    await api(`${projectPath(pid)}?expected_revision=${expectedRevision}`, { method: "DELETE" });
+    setProjects(previous => previous.filter(item => item.project_id !== pid));
+    if (localStorage.getItem("shiguang-project") === pid) localStorage.removeItem("shiguang-project");
+    if (project?.project_id === pid) {
+      ++refreshId.current;
+      setProject(null);
+      setAssets([]);
+      setAnalyses({});
+      setSelected("");
+      setRun(null);
+      setInstruction("");
+      playhead.current = 0;
+    }
+  });
+
+  /** 创建新的聊天会话，共用当前工程的素材和时间线。 */
+  const newSession = () => {
+    if (!project || chatSessions.loading || !conversation.ready) return;
+    return task("创建会话", async () => {
+      await chatSessions.create();
+      setRun(null);
+      setInstruction("");
+    });
+  };
+
+  /** 切换历史会话，运行中的任务须先结束或取消。 */
+  const switchSession = (sessionId: string) => {
+    if (!project || chatSessions.loading || !conversation.ready) return;
+    return task("切换会话", async () => {
+      chatSessions.select(sessionId);
+      setRun(null);
+      setInstruction("");
+    });
+  };
 
   /** 通过隔离草稿执行一次编辑并原子提交。
    * Args:
@@ -190,23 +290,31 @@ export function useEditor() {
       });
       await post(`${prefix}/drafts/${draft.id}/commit`);
       await refresh(project.project_id);
-      setExported(null);
     });
   }
 
-  /** 导入目录素材或浏览器选择的文件。
+  /** 根据选中对象移除画面或独立音频，保留素材库中的原素材。 */
+  function deleteSelected() {
+    if (project?.snapshot.audio_items.some(item => item.audio_id === selected))
+      return edit("remove_audio", { audio_id: selected });
+    if (project?.snapshot.clips.some(clip => clip.clip_id === selected))
+      return edit("delete_clip", { clip_id: selected });
+  }
+
+  /** 复用历史素材或导入浏览器选择的文件。
    * Args:
-   *   files: 相对路径或本地文件列表。
-   *   onImported: 所有文件完成导入后触发，用于关闭素材选择弹窗。
+   *   files: 已登记的历史素材、本地文件或兼容旧接口的相对路径。
+   *   onAccepted: 取得导入执行权后触发，用于立即收起素材选择弹窗。
    * Returns:
    *   导入及刷新是否完成。
    */
   async function importFiles(
-    files: (string | File)[],
-    onImported?: () => void,
+    files: (string | File | LibraryFile)[],
+    onAccepted?: () => void,
   ) {
     if (!project || !files.length) return false;
     return task("导入素材", async () => {
+      onAccepted?.();
       const imported: Asset[] = [];
       for (const [index, file] of files.entries()) {
         setBusy(
@@ -218,6 +326,11 @@ export function useEditor() {
                 `${projectPath(project.project_id)}/assets/import`,
                 { path: file },
               )
+            : !(file instanceof File)
+            ? await post<Asset>(`${projectPath(project.project_id)}/assets/reuse`, {
+                source_project_id: file.project_id,
+                source_asset_id: file.asset_id,
+              })
             : await api<Asset>(
                 `${projectPath(project.project_id)}/assets/upload?filename=${encodeURIComponent(file.name)}`,
                 {
@@ -234,7 +347,6 @@ export function useEditor() {
         );
         imported.push(asset);
       }
-      onImported?.();
       await refresh(project.project_id);
       if (perception?.vision.configured || perception?.speech.configured) {
         for (const asset of imported) {
@@ -253,8 +365,9 @@ export function useEditor() {
    * Args:
    *   asset: 已导入素材。
    *   beforeClipId: 可选的插入位置，空值表示末尾。
+   *   audioStartFrame: 音频插入帧，默认使用当前播放头。
    */
-  async function addAsset(asset: Asset, beforeClipId: string | null = null) {
+  async function addAsset(asset: Asset, beforeClipId: string | null = null, audioStartFrame = playhead.current) {
     if (!project) return;
     if (asset.kind === "audio") {
       const total = layout(project.snapshot).total;
@@ -262,9 +375,10 @@ export function useEditor() {
         report(new ApiError("请先添加画面，再添加配乐。"));
         return;
       }
+      const start = Math.max(0, Math.min(Math.round(audioStartFrame), total - 1));
       await edit("add_audio", {
         asset_id: asset.asset_id,
-        anchor: { end_frame: Math.min(total, asset.total_frames) },
+        anchor: { start_frame: start, end_frame: Math.min(total, start + asset.total_frames) },
       });
     } else {
       await edit("insert_clip", {
@@ -293,7 +407,6 @@ export function useEditor() {
         expected_revision: project.revision,
       });
       await refresh(project.project_id);
-      setExported(null);
     });
 
   /** 提交自然语言指令并轮询真实执行进度。
@@ -301,8 +414,8 @@ export function useEditor() {
    *   text: 完整编辑要求。
    *   onAccepted: 操作取得执行权后触发，用于清空已发送的输入。
    */
-  async function command(text: string, onAccepted?: () => void) {
-    if (!project || !text.trim() || !model?.configured) return false;
+  async function command(text: string, onAccepted?: () => void, resumeRunId?: string) {
+    if (!project || !text.trim() || !model?.configured || !conversation.ready || chatSessions.loading) return false;
     return task("AI 正在编辑", async () => {
       const id = crypto.randomUUID();
       const prefix = projectPath(project.project_id);
@@ -312,12 +425,21 @@ export function useEditor() {
       let polling = false,
         active = true;
       let lastUpdate: Run | null = null;
+      let sessionNoted = false;
+      const noteSession = (accepted: Run) => {
+        if (sessionNoted) return;
+        const sid = accepted.session_id || chatSessions.sessionId;
+        if (!sid) return;
+        sessionNoted = true;
+        chatSessions.noteMessage(sid, text);
+      };
       const timer = window.setInterval(async () => {
         if (polling) return;
         polling = true;
         try {
           const update = await api<Run>(`${prefix}/commands/${id}`);
           if (alive.current && active) {
+            noteSession(update);
             lastUpdate = update;
             if (update.status === "running") setRun(update);
           }
@@ -330,19 +452,23 @@ export function useEditor() {
       try {
         const submitted = post<Run>(`${prefix}/commands`, {
           request_id: id,
+          session_id: chatSessions.sessionId,
+          ...(!chatSessions.sessionId ? { new_session: true } : {}),
+          ...(resumeRunId ? { resume_run_id: resumeRunId } : {}),
           instruction: text,
           expected_revision: project.revision,
-          selected_clip_ids: selected ? [selected] : [],
+          // 明确续跑使用服务端保存的任务上下文，不把当前正式时间线选区带入旧草稿。
+          selected_clip_ids: !resumeRunId && project.snapshot.clips.some(clip => clip.clip_id === selected) ? [selected] : [],
           playhead_frame: playhead.current,
         });
         // 取消接口可先返回终态，无需等待上游模型连接退出才能继续操作。
         const cancelled = new Promise<Run>(resolve => { finishCommand.current = resolve; });
         const result = await Promise.race([submitted, cancelled]);
+        noteSession(result);
         active = false;
         await refresh(project.project_id);
         setRun(result);
         conversation.remember(result, text);
-        setExported(null);
       } catch (err) {
         // 失败运行现在返回 4xx/5xx，同时保留运行记录供面板展示原因和进度。
         if (
@@ -351,12 +477,14 @@ export function useEditor() {
           typeof err.payload === "object" &&
           "run_id" in err.payload
         ) {
+          noteSession(err.payload as Run);
           setRun(err.payload as Run);
           conversation.remember(err.payload as Run, text);
         } else {
           // 命令连接中断后用同一请求编号找回运行，交给历史轮询继续跟踪。
           const existing = await api<Run>(`${prefix}/commands/${id}`).catch(() => lastUpdate);
           if (existing) {
+            noteSession(existing);
             conversation.remember(existing, text);
             setRun(existing.status === "running" ? null : existing);
             if (existing.status === "running") setInstruction("");
@@ -383,17 +511,6 @@ export function useEditor() {
       report(err);
     }
   }
-
-  /** 渲染并发布当前工程的 MP4 成片。 */
-  const exportVideo = () =>
-    project &&
-    task("正在导出成片", async () => {
-      setExported(
-        await post<ExportResult>(`${projectPath(project.project_id)}/render`, {
-          expected_revision: project.revision,
-        }),
-      );
-    });
 
   async function analyzeOne(aid: string, force = false, speechOnly = false) {
     if (!project) return;
@@ -471,21 +588,31 @@ export function useEditor() {
     selected,
     run,
     instruction,
-    exported,
+    exportState,
     conversation,
+    chatSessions,
+    newSession,
+    switchSession,
     setSelected,
     setError,
     report,
     refresh,
     create,
     open,
+    refreshProjects,
+    deleteProject,
+    savepoint,
+    restoreSavepoint,
+    removeSavepoint,
+    savepointNotice,
+    clearSavepointNotice: () => setSavepointNotice(""),
     edit,
+    deleteSelected,
     importFiles,
     addAsset,
     history,
     command,
     cancel,
-    exportVideo,
     analyses,
     perception,
     analyze,

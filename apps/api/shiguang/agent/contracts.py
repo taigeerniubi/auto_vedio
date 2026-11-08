@@ -1,5 +1,6 @@
 """定义智能体请求、循环预算和模型调用契约。"""
 from dataclasses import dataclass
+import os
 from typing import Annotated, Protocol
 
 from pydantic import Field
@@ -9,6 +10,9 @@ from ..models import Model
 
 class Command(Model):
     request_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    session_id: str | None = Field(default=None, min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    new_session: bool = Field(default=False, strict=True)
+    resume_run_id: str | None = Field(default=None, min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     instruction: str = Field(min_length=1, max_length=8000)
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
     selected_clip_ids: list[str] = Field(default_factory=list, max_length=40)
@@ -16,7 +20,8 @@ class Command(Model):
 
 
 class Finish(Model):
-    summary: str = Field(min_length=1, max_length=2000)
+    summary: str = Field(min_length=1, max_length=8000,
+                         description="直接展示给用户的完整答复。问答必须写出结论、依据和建议，不得仅写‘已说明’或‘已回答’的工作摘要。")
 
 
 class AskUser(Model):
@@ -29,15 +34,32 @@ class Unsupported(Model):
 
 @dataclass(frozen=True)
 class Limits:
-    rounds: int = 8
+    rounds: int = 24
     calls: int = 32
     errors: int = 3
-    seconds: float = 180
+    seconds: float | None = None
+
+    @classmethod
+    def from_env(cls):
+        """读取可配置的规划轮次；总运行时间默认不设截止时间。"""
+        try:
+            rounds = int(os.getenv("SHIGUANG_AGENT_MAX_ROUNDS", str(cls.rounds)))
+            if rounds <= 0:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError("SHIGUANG_AGENT_MAX_ROUNDS must be a positive integer") from exc
+        try:
+            seconds = float(os.getenv("SHIGUANG_AGENT_TIMEOUT_SECONDS", "0"))
+            return cls(rounds=rounds, seconds=None if seconds == 0 else seconds)
+        except ValueError as exc:
+            raise ValueError("SHIGUANG_AGENT_TIMEOUT_SECONDS must be a finite non-negative number") from exc
 
     def __post_init__(self):
         """拒绝无效或非有限的循环预算。"""
         import math
-        if min(self.rounds, self.calls, self.errors, self.seconds) <= 0 or not math.isfinite(self.seconds):
+        if min(self.rounds, self.calls, self.errors) <= 0 or (
+            self.seconds is not None and (self.seconds <= 0 or not math.isfinite(self.seconds))
+        ):
             raise ValueError("循环预算必须为有限正数")
 
 
@@ -49,7 +71,7 @@ class ToolCall:
 
 
 class Session(Protocol):
-    def step(self, results: list[tuple[str, dict]], timeout: float) -> list[ToolCall]:
+    def step(self, results: list[tuple[str, dict]], timeout: float | None) -> list[ToolCall]:
         """将工具结果交给模型并取得下一批调用。
 
         Args:

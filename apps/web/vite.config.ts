@@ -12,7 +12,8 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: process.env.SHIGUANG_API_URL || "http://127.0.0.1:8000",
-        timeout: 300000,
+        // 长任务由后端单次请求超时和用户取消控制，代理不截断整个剪辑任务。
+        timeout: 0,
       },
       "/health": process.env.SHIGUANG_API_URL || "http://127.0.0.1:8000",
     },

@@ -118,6 +118,38 @@ def test_empty_change_does_not_create_revision(context):
     assert result["result"]["revision"] == 0 and not result["result"]["changed"]
 
 
+def test_audio_progress_names_each_asset_on_failure_and_success(context):
+    store, pid, _ = context
+    class Analysis:
+        def query_audio(self, project_id, asset_id, question):
+            assert project_id == pid and not question.include_timestamps
+            if asset_id == "a":
+                raise ToolError("MODEL_ANALYSIS_INVALID", "音频模型回答缺少 answer",
+                                details={"validation_errors": [{"field": ["answer"], "error_type": "missing"}]})
+            return {"answer": "电子乐", "matches": []}
+    store.analysis_service = Analysis()
+    questions = [tc("query_audio", {"asset_id": aid, "query": "什么风格？", "include_timestamps": False}, aid)
+                 for aid in ("a", "music")]
+    session = ScriptSession([questions, [tc("ask_user", {"question": "第一份素材分析失败，是否重试？"})]])
+    result = Agent(store, lambda _: session).execute(pid, command())
+    events = [event for event in result["events"] if event.get("工具") == "query_audio"]
+    assert [(event["事件"], event["asset_id"], event["asset_name"]) for event in events] == [
+        ("开始工具", "a", "a"), ("工具执行", "a", "a"),
+        ("开始工具", "music", "music"), ("工具执行", "music", "music")]
+    assert events[1]["状态"] == "失败" and events[3]["状态"] == "成功"
+    assert events[1]["参数错误"]["validation_errors"] == [{"field": ["answer"], "error_type": "missing"}]
+    assert store.project(pid)["revision"] == 0
+
+
+def test_removed_assets_are_excluded_from_agent_context(context):
+    from shiguang.agent.prompts import context as build_context
+    store, pid, did = context
+    assert call(store, did, "remove_asset", {"asset_id": "music"})["ok"]
+    ctx = build_context(store, store.draft(did), command())
+    assert {asset["asset_id"] for asset in ctx["素材"]} == {"a", "b", "pic"}
+    assert "music" in store.assets(pid)  # 元数据仍保留给撤销使用。
+
+
 def test_revision_conflict_during_loop_preserves_other_change(context):
     store, pid, manual = context
     def concurrent_edit(_):

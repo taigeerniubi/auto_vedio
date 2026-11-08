@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from shiguang import media
 from shiguang.api import create_app
-from shiguang.models import Clip, Snapshot, TextItem, Anchor, validate_snapshot
+from shiguang.models import Clip, Snapshot, TextItem, Anchor, Transition, validate_snapshot
 from shiguang.preview import prepare_preview
 from conftest import call, clip
 
@@ -60,6 +60,14 @@ def test_preview_reuses_media_for_visual_edits_and_invalidates_audio(context, tm
     s.clips[0].source_in_frame = 32
     prepare_preview(pid, s, assets)
     assert len(reversed_clips) == 2
+    s.clips.append(Clip(**clip("c2", "b")))
+    s.transitions = [Transition(left_clip_id="c1", right_clip_id="c2", duration_frames=6)]
+    dissolve, _ = prepare_preview(pid, s, assets)
+    mix_count = len(mixed)
+    s.transitions[0].preset_id = "slide_left"
+    slide, _ = prepare_preview(pid, s, assets)
+    assert slide["transitions"][0]["preset_id"] == "slide_left"
+    assert slide["mix_file"] == dissolve["mix_file"] and len(mixed) == mix_count
 
 
 def test_remove_asset_cascades_and_undo_restores_library_and_timeline(context, tmp_path):

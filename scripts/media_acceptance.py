@@ -68,6 +68,7 @@ def generate_fixtures():
     t = np.arange(4 * 48000) / 48000
     song = .2 * np.sin(2 * np.pi * 440 * t)
     write_audio(INPUTS / "music.wav", np.column_stack([song, song]))
+    ffmpeg("-i", INPUTS / "music.wav", "-c:a", "libmp3lame", "-b:a", "128k", INPUTS / "music.mp3")
 
 
 def read_frames(path, width=320, height=180):

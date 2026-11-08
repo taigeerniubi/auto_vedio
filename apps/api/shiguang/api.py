@@ -39,7 +39,7 @@ class RevisionRequest(Model):
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
 
 
-def create_app(db: Path | None = None, *, session_factory=None, agent_limits=None, log_dir: Path | None = None, perception_factory=None):
+def create_app(db: Path | None = None, *, session_factory=None, agent_limits=None, log_dir: Path | None = None, perception_factory=None, export_renderer=None):
     """装配本机 API，并允许测试注入模型会话。
 
     Args:
@@ -47,6 +47,7 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
         session_factory: 测试使用的模型会话工厂。
         agent_limits: 可选的智能体循环预算。
         log_dir: 可选日志目录，默认使用项目根目录下的 logs。
+        export_renderer: 测试使用的后台导出函数。
 
     Returns:
         已注册工具及智能体路由的 FastAPI 应用。
@@ -55,6 +56,8 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
     async def lifespan(_app):
         # 仅在实际启动该应用时恢复；导入模块或创建隔离测试应用不会触碰其他运行中的任务。
         service.recover_interrupted()
+        agent.runs.recover_interrupted()
+        exports.recover_interrupted()
         yield
 
     app = FastAPI(title="拾光 · 剪辑工具与智能体 API", version="0.2.0", lifespan=lifespan)
@@ -67,6 +70,10 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
     app.include_router(analysis_router(store, service))
     agent = Agent(store, **({"session_factory": session_factory} if session_factory else {}), limits=agent_limits)
     app.state.agent = agent
+    from .export_jobs import ExportService, export_router
+    exports = ExportService(store, renderer=export_renderer)
+    app.state.exports = exports
+    app.include_router(export_router(exports))
     app.add_middleware(RequestLogMiddleware, directory=log_dir or LOG_DIR)
     install_error_handlers(app)
     app.include_router(workspace_router(store))
@@ -135,18 +142,30 @@ def create_app(db: Path | None = None, *, session_factory=None, agent_limits=Non
         return agent.runs.get(pid, rid)
 
     @app.get("/api/v1/projects/{pid}/runs")
-    def conversation(pid: str, before: int | None = Query(default=None, ge=1), limit: int = Query(default=50, ge=1, le=100)):
+    def conversation(pid: str, before: int | None = Query(default=None, ge=1), limit: int = Query(default=50, ge=1, le=100),
+                     session_id: str | None = Query(default=None, min_length=1, max_length=100)):
         """读取当前工程的历史指令和执行结果。
 
         Args:
             pid: 工程编号。
             before: 可选的更早记录游标。
             limit: 每页条数。
+            session_id: 可选的当前会话编号。
 
         Returns:
             包含历史对话与下一页游标的结果。
         """
-        return agent.runs.conversation(pid, before=before, limit=limit)
+        return agent.runs.conversation(pid, before=before, limit=limit, session_id=session_id)
+
+    @app.get("/api/v1/projects/{pid}/sessions")
+    def sessions(pid: str):
+        """读取当前工程的全部聊天会话。"""
+        return agent.runs.sessions(pid)
+
+    @app.post("/api/v1/projects/{pid}/sessions")
+    def create_session(pid: str):
+        """在当前工程创建新的聊天会话。"""
+        return agent.runs.create_session(pid)
 
     @app.post("/api/v1/projects/{pid}/runs/{rid}/cancel")
     def cancel_run(pid: str, rid: str):

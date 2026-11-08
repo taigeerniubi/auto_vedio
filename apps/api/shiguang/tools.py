@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 from uuid import uuid4
 
 from pydantic import Field
+from .color_models import COLOR_PRESETS, ColorGrade, ColorPreset
 
 from .models import (Anchor, AudioItem, Clip, Duck, Frame, Gain, Model, Motion,
-                     PositiveFrame, Snapshot, TextItem, Transform, Transition, Unit,
+                     PositiveFrame, Snapshot, TextItem, Transform, Transition, TransitionPreset, Unit, Cover,
                      timeline, validate_snapshot)
 
 
@@ -87,13 +88,31 @@ class TransitionArgs(Model):
     left_clip_id: str
     right_clip_id: str
     duration_frames: Frame
-    preset_id: Literal["dissolve"] = "dissolve"
+    preset_id: TransitionPreset = "dissolve"
     preset_version: Literal[1] = 1
 
 
 class ColorArgs(ClipId):
-    preset_id: Literal["warm", "cool", "monochrome"] | None
+    preset_id: ColorPreset | None
     preset_version: Literal[1] = 1
+    intensity: Unit = 1
+
+
+class GradeArgs(Model):
+    clip_ids: list[str] = Field(min_length=1, max_length=40)
+    adjustments: ColorGrade
+    replace: bool = False
+    preset_id: ColorPreset | None = None
+    intensity: Unit = 1
+
+
+class CopyGradeArgs(Model):
+    source_clip_id: str
+    target_clip_ids: list[str] = Field(min_length=1, max_length=40)
+
+
+class CoverArgs(Model):
+    cover: Cover | None
 
 
 class AddTextArgs(Model):
@@ -236,7 +255,40 @@ def split(s, a):
     return [left.clip_id, right.clip_id], []
 
 
-@tool("delete_clip", ClipId, "删除片段，连带删除其专属文字、音频、转场及配乐压低规则。")
+def clamp_timeline_effects(s):
+    """收短时间线变短后越界的包装，移除完全落在结尾之外的内容。
+
+    Args:
+        s: 已更新片段和转场的隔离草稿。
+
+    Returns:
+        被收短或移除的文字和音频编号。
+    """
+    total = timeline(s)[1]
+    changed = []
+    if s.cover and s.cover.source == "timeline" and s.cover.frame >= total:
+        if total:
+            s.cover.frame = total - 1
+        else:
+            s.cover = None
+        changed.append("cover")
+    for items in (s.text_items, s.audio_items):
+        for item in list(items):
+            if item.anchor.kind != "timeline" or item.anchor.end_frame <= total:
+                continue
+            changed.append(item.audio_id if isinstance(item, AudioItem) else item.text_id)
+            if item.anchor.start_frame >= total:
+                items.remove(item)
+                continue
+            item.anchor.end_frame = total
+            if isinstance(item, AudioItem):
+                length = item.anchor.end_frame - item.anchor.start_frame
+                item.fade_in_frames = min(item.fade_in_frames, length)
+                item.fade_out_frames = min(item.fade_out_frames, length - item.fade_in_frames)
+    return changed
+
+
+@tool("delete_clip", ClipId, "删除片段及其专属效果，并收短或移除超出新成片结尾的文字和配乐；可撤销。")
 def delete(s, a):
     c = find_clip(s, a.clip_id)
     s.clips.remove(c)
@@ -245,7 +297,10 @@ def delete(s, a):
     for x in s.audio_items:
         x.ducks = [d for d in x.ducks if d.clip_id != c.clip_id]
     warnings = discard_invalid_transitions(s)
-    return [c.clip_id], warnings
+    changed = clamp_timeline_effects(s)
+    if changed:
+        warnings.append("已同步收短或移除超出成片时长的文字和配乐")
+    return [c.clip_id, *changed], warnings
 
 
 @tool("remove_asset", AssetId, "从项目移除素材及其时间线引用，可撤销；保留磁盘原文件。")
@@ -266,16 +321,9 @@ def remove_asset(s, a):
             changed.extend(ids)
             warnings.extend(notes)
     s.audio_items = [item for item in s.audio_items if item.asset_id != a.asset_id]
-    total = timeline(s)[1]
-    for items in (s.text_items, s.audio_items):
-        items[:] = [item for item in items if item.anchor.kind != "timeline" or item.anchor.start_frame < total]
-        for item in items:
-            if item.anchor.kind == "timeline":
-                item.anchor.end_frame = min(item.anchor.end_frame, total)
-    for item in s.audio_items:
-        length = item.anchor.end_frame - item.anchor.start_frame
-        item.fade_in_frames = min(item.fade_in_frames, length)
-        item.fade_out_frames = min(item.fade_out_frames, length - item.fade_in_frames)
+    if s.cover and s.cover.asset_id == a.asset_id:
+        s.cover = None
+        changed.append("cover")
     if a.asset_id not in s.removed_asset_ids:
         s.removed_asset_ids.append(a.asset_id)
     return changed, warnings
@@ -317,7 +365,7 @@ def playback(s, a):
     return [c.clip_id], []
 
 
-@tool("set_transform", TransformArgs, "设置 cover/contain、锚点、缩放和基础旋转；cover 自动补足旋转覆盖范围。")
+@tool("set_transform", TransformArgs, "设置 cover/contain、锚点、0.1–4 倍整体缩放 scale、旋转及位置。scale_x/y 为额外的宽/高拉伸倍数（0.1–4，默认 1）；只改一个轴可自由拉伸。position_x/y 为相对画布宽高的平移，0 居中；缩小允许黑边。")
 def transform(s, a):
     c = find_clip(s, a.clip_id)
     c.transform = a.transform
@@ -331,20 +379,61 @@ def motion(s, a):
     return [c.clip_id], []
 
 
-@tool("set_transition", TransitionArgs, "设置相邻片段的叠化；duration_frames=0 清除。")
+@tool("set_transition", TransitionArgs, "设置相邻镜头转场：dissolve 叠化、slide_* 推移、wipe_* 擦除、fade_black 淡黑、fade_white 闪白、iris_open 圆形展开、flip_* 翻转、cube_* 立方体、clock_wipe 时钟擦除、push_cut 冲击切换、cross_zoom 缩放模糊、blur_slide_* 模糊甩镜、film_burn 胶片漏光、glitch 故障闪切。* 为 left/right/up/down，表示运动方向。duration_frames=0 清除；重叠缩短成片，越界文字和配乐同步收短。")
 def transition(s, a):
     find_clip(s, a.left_clip_id)
     find_clip(s, a.right_clip_id)
     s.transitions = [t for t in s.transitions if (t.left_clip_id, t.right_clip_id) != (a.left_clip_id, a.right_clip_id)]
     if a.duration_frames:
         s.transitions.append(Transition(**a.model_dump()))
-    return [a.left_clip_id, a.right_clip_id], []
+    changed = clamp_timeline_effects(s)
+    warnings = ["已同步收短或移除超出成片时长的文字和配乐"] if changed else []
+    return [a.left_clip_id, a.right_clip_id, *changed], warnings
 
 
-@tool("set_color_preset", ColorArgs, "应用暖色、冷色、黑白预设；preset_id=null 清除。")
+@tool("set_color_preset", ColorArgs, "应用 list_presets 中的 18 款色彩风格，intensity=0–1；preset_id=null 清除滤镜，保留手动调色。")
 def color(s, a):
-    find_clip(s, a.clip_id).color_preset = a.preset_id
+    c = find_clip(s, a.clip_id)
+    c.color_preset, c.color_preset_intensity = a.preset_id, a.intensity
     return [a.clip_id], []
+
+
+def merge_grade(before, patch):
+    for key, value in patch.items():
+        if isinstance(value, dict):
+            merge_grade(before[key], value)
+        else:
+            before[key] = value
+    return before
+
+
+@tool("set_color_grade", GradeArgs, "调整一个或多个片段的曝光 EV、对比度、白平衡、饱和度、鲜艳度、明暗、四个色轮、八色 HSL、RGB/色相曲线。默认只更新显式传入的参数；replace=true 替换全部手动参数。曲线 x 从 0 到 1 严格递增，色相曲线首尾 y 相同，y=0.5 为无变化。enabled=false 旁路手动调色。处理为浮点 SDR，不是 HDR 色彩管理。")
+def grade(s, a):
+    for cid in a.clip_ids:
+        c = find_clip(s, cid)
+        c.color_grade = ColorGrade.model_validate(a.adjustments.model_dump() if a.replace else
+            merge_grade(c.color_grade.model_dump(), a.adjustments.model_dump(exclude_unset=True)))
+        if "preset_id" in a.model_fields_set:
+            c.color_preset = a.preset_id
+        if "intensity" in a.model_fields_set:
+            c.color_preset_intensity = a.intensity
+    return a.clip_ids, []
+
+
+@tool("copy_color_grade", CopyGradeArgs, "把指定片段的手动调色、滤镜及强度复制到其他片段；不是自动分析后的镜头匹配。")
+def copy_grade(s, a):
+    source = find_clip(s, a.source_clip_id)
+    for cid in a.target_clip_ids:
+        c = find_clip(s, cid)
+        c.color_grade = source.color_grade.model_copy(deep=True)
+        c.color_preset, c.color_preset_intensity = source.color_preset, source.color_preset_intensity
+    return a.target_clip_ids, []
+
+
+@tool("set_cover", CoverArgs, "设置可撤销封面：source=timeline 取成片 frame（30fps，含调色/文字/转场），或 source=image 使用项目图片 asset_id。可加标题、位置、字号、颜色及遮罩。cover=null 移除；不插入视频或修改视频时长，下载由用户点击导出封面。")
+def cover(s, a):
+    s.cover = a.cover
+    return ["cover"], []
 
 
 @tool("add_text", AddTextArgs, "添加可绑定片段或成片时间的文字。")
@@ -441,5 +530,6 @@ def presets():
     return {"version": 1, "motion": {"ids": ["slow_push_in", "slow_pull_out", "pan_left", "pan_right", "pan_up", "pan_down"],
             "intensity": {"exclusive_min": 0, "max": 0.5}, "easing": ["linear", "ease_in_out"],
             "fit_required": "cover", "coverage": "覆盖范围在共享合成函数中解析计算，避免黑边"},
-            "color": ["warm", "cool", "monochrome"], "transition": ["dissolve"], "text": ["title", "subtitle"],
+            "color": list(get_args(ColorPreset)), "color_details": COLOR_PRESETS,
+            "transition": list(get_args(TransitionPreset)), "text": ["title", "subtitle"],
             "styles": STYLES}

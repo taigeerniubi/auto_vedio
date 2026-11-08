@@ -128,6 +128,36 @@ test("缺少模型时清楚展示配置状态，素材分析和字幕入口可�
   );
 });
 
+test("声音按钮展开滑杆，拖动调节音量并可独立静音恢复", async ({ page }) => {
+  const { root } = await ready(page);
+  await expect(page.getByRole("button", { name: "播放", exact: true })).toBeEnabled();
+  const before = await (await page.request.get(root)).json();
+  const trigger = page.getByRole("button", { name: "调节预览音量", exact: true });
+  await trigger.click();
+  const slider = page.getByRole("slider", { name: "预览音量", exact: true });
+  await expect(slider).toHaveValue("100");
+  const bounds = (await slider.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width - 8, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + 8 + (bounds.width - 16) * 0.35, bounds.y + bounds.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const volume = Number(await slider.inputValue());
+  expect(volume).toBeGreaterThanOrEqual(32);
+  expect(volume).toBeLessThanOrEqual(38);
+  await page.getByRole("button", { name: "静音预览", exact: true }).click();
+  await expect(slider).toHaveValue("0");
+  await page.getByRole("button", { name: "恢复预览声音", exact: true }).click();
+  await expect(slider).toHaveValue(String(volume));
+  await slider.press("Home");
+  await expect(slider).toHaveValue("0");
+  await slider.press("ArrowRight");
+  await expect(slider).toHaveValue("1");
+  await page.screenshot({ path: "artifacts/frontend-acceptance/preview-volume-slider.png", fullPage: true });
+  await page.getByRole("heading", { name: "成片预览", exact: true }).click();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  expect(await (await page.request.get(root)).json()).toEqual(before);
+});
+
 test("后台分析显示进度、恢复结果，并按画面内容搜索素材", async ({ page }) => {
   await page.route("**/api/v1/perception-status", (route) => route.fulfill({ json: { vision: { configured: true, model: "mock-vision" }, speech: { configured: false, model: "" } } }));
   const { root, asset } = await ready(page);
@@ -290,7 +320,7 @@ test("AI 工作中显示实时草稿、跟随文字修改，取消后恢复正�
   const {snapshot} = await (await page.request.get(root)).json();
   const live = {run_id: "live-test", project_id: pid, status: "running", result: {}, events: [
     {事件: "工具执行", 工具: "add_text", 状态: "成功", draft_seq: 1, changed_ids: ["title1"]},
-    {事件: "开始工具", 工具: "query_audio"},
+    {事件: "开始工具", 工具: "query_audio", asset_id: "music", asset_name: "配乐试听.wav"},
   ], live_draft: {base: 1, seq: 1, snapshot: {...snapshot, text_items: [{
     text_id: "title1", text: "草稿标题", anchor: {kind: "timeline", start_frame: 15, end_frame: 45},
     style_preset: "title", x: 0.5, y: 0.5, font_size: 32, color: "#ffffff",
@@ -307,7 +337,7 @@ test("AI 工作中显示实时草稿、跟随文字修改，取消后恢复正�
   await expect(monitor).toContainText("草稿标题");
   await expect(monitor.getByRole("slider")).toHaveValue("15");
   await expect(page.locator(".text-track [data-changed=true]")).toContainText("草稿标题");
-  await expect(page.locator(".working-step")).toContainText("听取素材音频");
+  await expect(page.locator(".working-step")).toContainText("听取素材音频 · 配乐试听.wav");
   await expect(page.getByRole("button", {name: "导出成片"})).toBeDisabled();
   await page.screenshot({path: ".cache/draft-monitor-workspace.png"});
   try {

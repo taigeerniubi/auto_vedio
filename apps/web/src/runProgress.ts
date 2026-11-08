@@ -14,6 +14,9 @@ const toolLabels: Record<string, string> = {
   apply_motion_preset: "设置运镜",
   set_transition: "设置转场",
   set_color_preset: "调整色调",
+  set_color_grade: "调整画面色彩",
+  copy_color_grade: "复制调色",
+  set_cover: "设置封面",
   add_text: "添加文字",
   update_text: "修改文字",
   remove_text: "移除文字",
@@ -38,6 +41,10 @@ const toolLabels: Record<string, string> = {
 };
 
 export function progressLabel(event: Run["events"][number]) {
+  if (event.事件 === "重试模型") return event.原因 || "正在重试模型请求";
+  if (event.事件 === "恢复任务") return "继续上次任务，已恢复保存的进度";
   if (event.事件 === "请求模型") return `第 ${event.轮次} 轮规划`;
-  return toolLabels[event.工具 || ""] || event.工具 || event.事件;
+  const label = event.工具 === "query_audio" && event.cache_hit ? "复用音频分析"
+    : toolLabels[event.工具 || ""] || event.工具 || event.事件;
+  return event.asset_name ? `${label} · ${event.asset_name}` : label;
 }

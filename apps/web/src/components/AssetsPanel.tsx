@@ -1,13 +1,15 @@
 // 展示素材库并提供素材导入、文字、转场和调色操作。
-import { useEffect, useRef, useState } from "react";
-import { api, thumbnailUrl } from "../api";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { api, ApiError, projectPath, thumbnailUrl } from "../api";
 import type { Asset, LibraryFile, TextItem } from "../contracts";
 import type { Editor } from "../hooks/useEditor";
 import { duration, layout, timecode } from "../timeline";
 import { Button, Icon, Modal } from "./Ui";
 import { AssetAnalysis } from "./AssetAnalysis";
+import { AudioPreview } from "./AudioPreview";
+import { TransitionsPanel } from "./TransitionsPanel";
 
-export type Section = "assets" | "audio" | "text" | "transitions" | "color";
+export type Section = "assets" | "audio" | "text" | "transitions";
 
 /** 渲染素材与效果侧栏。
  * Args:
@@ -19,9 +21,15 @@ export type Section = "assets" | "audio" | "text" | "transitions" | "color";
 export function AssetsPanel({
   editor: e,
   section,
+  audioPlayer,
+  onAudioPlay,
+  onTransitionPreview,
 }: {
   editor: Editor;
   section: Section;
+  audioPlayer: RefObject<HTMLAudioElement | null>;
+  onAudioPlay: () => void;
+  onTransitionPreview: (frame: number) => void;
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
@@ -31,6 +39,12 @@ export function AssetsPanel({
   const [checked, setChecked] = useState<string[]>([]);
   const [analysisAsset, setAnalysisAsset] = useState<string | null>(null);
   const [removing, setRemoving] = useState<Asset | null>(null);
+  const [audition, setAudition] = useState<{
+    id: string; name: string; src: string; scope: "project" | "library";
+  } | null>(null);
+  const [auditionPlaying, setAuditionPlaying] = useState(false);
+  const auditionSource = useRef(audition?.src);
+  auditionSource.current = audition?.src;
   const fileInput = useRef<HTMLInputElement>(null);
   const snapshot = e.project?.snapshot;
   const clip = snapshot?.clips.find((c) => c.clip_id === e.selected);
@@ -38,14 +52,43 @@ export function AssetsPanel({
   const disabled = !!e.busy || !e.project;
 
   useEffect(() => {
+    setAudition(null);
+    setAuditionPlaying(false);
+  }, [e.project?.project_id, section, showLibrary, analysisAsset, search, filter]);
+
+  useEffect(() => {
+    if (audition?.scope === "project" && !e.assets.some((asset) => asset.asset_id === audition.id)) setAudition(null);
+  }, [e.assets, audition]);
+
+  function listen(next: NonNullable<typeof audition>) {
+    if (audition?.src === next.src && audioPlayer.current) {
+      if (audioPlayer.current.paused) {
+        void audioPlayer.current.play().catch((error: DOMException) => {
+          if (auditionSource.current === next.src && error.name !== "AbortError") e.report(error);
+        });
+      } else audioPlayer.current.pause();
+    } else {
+      setAuditionPlaying(false);
+      setAudition(next);
+    }
+  }
+
+  const isPlaying = (scope: "project" | "library", id: string) =>
+    auditionPlaying && audition?.scope === scope && audition.id === id;
+
+  useEffect(() => {
     if (!showLibrary) return;
+    let active = true;
     setLoading(true);
     setChecked([]);
     api<LibraryFile[]>("/api/v1/library")
-      .then(setLibrary)
-      .catch(e.report)
-      .finally(() => setLoading(false));
+      .then(files => { if (active) setLibrary(files); })
+      .catch(error => { if (active) e.report(error); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [showLibrary]);
+
+  const libraryId = (file: LibraryFile) => `${file.project_id}:${file.asset_id}`;
 
   const media = e.assets.filter(
     (a) =>
@@ -68,7 +111,6 @@ export function AssetsPanel({
               audio: "配乐与声音",
               text: "文字与标题",
               transitions: "片段转场",
-              color: "画面调色",
             }[section]
           }
         </h2>
@@ -83,12 +125,12 @@ export function AssetsPanel({
             </Button>
             <button
               className="quick-upload"
-              title="从电脑上传"
-              aria-label="从电脑上传"
+              title="从文件导入"
+              aria-label="从文件导入"
               disabled={disabled}
               onClick={() => fileInput.current?.click()}
             >
-              <Icon name="arrow" />
+              <Icon name="folder" />
             </button>
           </div>
         )}
@@ -151,16 +193,22 @@ export function AssetsPanel({
               >
                 <button
                   className="asset-thumb"
-                  disabled={disabled}
-                  onDoubleClick={() => void e.addAsset(asset)}
+                  disabled={asset.kind === "audio" ? false : disabled}
+                  onClick={asset.kind === "audio" ? () => listen({
+                    id: asset.asset_id, name: asset.name, scope: "project",
+                    src: `${projectPath(e.project!.project_id)}/assets/${asset.asset_id}/file`,
+                  }) : undefined}
+                  onDoubleClick={asset.kind === "audio" ? undefined : () => void e.addAsset(asset)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") void e.addAsset(asset);
+                    if (asset.kind !== "audio" && event.key === "Enter") void e.addAsset(asset);
                   }}
-                  aria-label={`素材 ${asset.name}`}
+                  data-audio-toggle={asset.kind === "audio" || undefined}
+                  aria-pressed={asset.kind === "audio" ? isPlaying("project", asset.asset_id) : undefined}
+                  aria-label={`${asset.kind === "audio" ? (isPlaying("project", asset.asset_id) ? "暂停试听" : "试听") : "素材"} ${asset.name}`}
                 >
                   {asset.kind === "audio" ? (
                     <div className="audio-art">
-                      <Icon name="music" />
+                      <Icon name={isPlaying("project", asset.asset_id) ? "pause" : "play"} />
                     </div>
                   ) : (
                     <img
@@ -182,7 +230,7 @@ export function AssetsPanel({
                   <div className="asset-meta">
                     <small>
                       {asset.kind === "audio"
-                        ? "音频素材"
+                        ? (isPlaying("project", asset.asset_id) ? "正在试听" : "点击封面试听")
                         : `${asset.width} × ${asset.height}`}
                     </small>
                     <button
@@ -201,7 +249,7 @@ export function AssetsPanel({
                     disabled={disabled}
                     onClick={() => void e.addAsset(asset)}
                   >
-                    +
+                    <Icon name="plus" />
                   </button>
                   <button
                     className="asset-add asset-remove"
@@ -289,78 +337,8 @@ export function AssetsPanel({
           ))}
         </div>
       ) : section === "transitions" ? (
-        <div className="effect-content">
-          <div className="transition-art">
-            <div />
-            <div />
-          </div>
-          <h3>叠化</h3>
-          <p className="muted">让相邻的两个镜头自然衔接。</p>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!snapshot || !clip) return;
-              const next = snapshot.clips[snapshot.clips.indexOf(clip) + 1];
-              void e.edit("set_transition", {
-                left_clip_id: clip.clip_id,
-                right_clip_id: next.clip_id,
-                duration_frames: Number(
-                  new FormData(event.currentTarget).get("frames"),
-                ),
-              });
-            }}
-          >
-            <label>
-              转场时长
-              <select name="frames" defaultValue="12">
-                <option value="6">0.2 秒</option>
-                <option value="12">0.4 秒</option>
-                <option value="24">0.8 秒</option>
-                <option value="0">移除转场</option>
-              </select>
-            </label>
-            <Button
-              type="submit"
-              disabled={
-                disabled ||
-                !clip ||
-                snapshot?.clips.at(-1)?.clip_id === clip.clip_id
-              }
-            >
-              应用到下一片段
-            </Button>
-          </form>
-          <small>先选择一个后面还有镜头的片段。</small>
-        </div>
-      ) : (
-        <div className="effect-content">
-          <p className="muted">为选中的镜头确定一种情绪。</p>
-          <div className="color-presets">
-            {[
-              [null, "原色"],
-              ["warm", "暖阳"],
-              ["cool", "清冷"],
-              ["monochrome", "黑白"],
-            ].map(([preset, label]) => (
-              <button
-                key={label}
-                disabled={disabled || !clip}
-                className={clip?.color_preset === preset ? "chosen" : ""}
-                onClick={() =>
-                  void e.edit("set_color_preset", {
-                    clip_id: clip!.clip_id,
-                    preset_id: preset,
-                  })
-                }
-              >
-                <span className={`swatch ${preset || "original"}`} />
-                {label}
-              </button>
-            ))}
-          </div>
-          {!clip && <small>请先在时间线中选择一个片段。</small>}
-        </div>
-      )}
+        <TransitionsPanel editor={e} onPreview={onTransitionPreview} />
+      ) : null}
       {analysisAsset &&
         e.project &&
         e.assets.some((a) => a.asset_id === analysisAsset) && (
@@ -389,12 +367,10 @@ export function AssetsPanel({
       {showLibrary && (
         <Modal
           title="导入素材"
-          onClose={() => {
-            if (!e.busy) setShowLibrary(false);
-          }}
+          onClose={() => setShowLibrary(false)}
         >
           <p className="muted">
-            从项目的 database 文件夹选择素材，或从电脑上传。
+            选择之前导入过的素材，或从文件添加新素材。
           </p>
           {e.error && (
             <p role="alert" className="failure-text">
@@ -402,56 +378,86 @@ export function AssetsPanel({
             </p>
           )}
           {e.busy && <p role="status">{e.busy}，正在处理，请稍候…</p>}
+          <button className="library-upload-card" disabled={!!e.busy}
+            onClick={() => fileInput.current?.click()}>
+            <Icon name="folder" />
+            <span><strong>从文件导入</strong><small>选择视频、图片或音频，可多选</small></span>
+            <Icon name="plus" />
+          </button>
+          {!loading && <h3 className="library-history-heading">导入历史{library.length ? ` · ${library.length}` : ""}</h3>}
           <div className="library-list">
             {loading ? (
-              <p>正在读取素材目录…</p>
+              <p>正在读取导入历史…</p>
             ) : library.length ? (
               library.map((file) => (
-                <label key={file.path}>
+                <div className="library-row" key={libraryId(file)}>
+                <label>
                   <input
                     type="checkbox"
                     disabled={!!e.busy}
-                    checked={checked.includes(file.path)}
+                    checked={checked.includes(libraryId(file))}
                     onChange={(event) =>
                       setChecked((old) =>
                         event.target.checked
-                          ? [...old, file.path]
-                          : old.filter((p) => p !== file.path),
+                          ? [...old, libraryId(file)]
+                          : old.filter((id) => id !== libraryId(file)),
                       )
                     }
                   />
+                  {file.kind === "audio" ? <span className="library-history-thumb"><Icon name="music" /></span> :
+                    <img className="library-history-thumb" loading="lazy" alt="" src={thumbnailUrl(file.project_id, file.asset_id)} />}
                   <span>
                     <strong>{file.name}</strong>
-                    <small>{file.path}</small>
+                    <small>{file.kind === "audio" ? "音频" : file.kind === "video" ? "视频" : "图片"}
+                      {file.kind === "image" ? ` · ${file.width} × ${file.height}` : ` · ${timecode(file.total_frames).slice(0, 5)}`}</small>
                   </span>
                   <small>{(file.size / 1024 / 1024).toFixed(1)} MB</small>
                 </label>
+                {file.kind === "audio" && (
+                  <Button icon={isPlaying("library", libraryId(file)) ? "pause" : "play"}
+                    aria-pressed={isPlaying("library", libraryId(file))}
+                    aria-label={`${isPlaying("library", libraryId(file)) ? "暂停试听" : "试听"} ${file.name}`} onClick={() => listen({
+                    id: libraryId(file), name: file.name, scope: "library",
+                    src: `${projectPath(file.project_id)}/assets/${file.asset_id}/file`,
+                  })}>{isPlaying("library", libraryId(file)) ? "暂停" : "试听"}</Button>
+                )}
+                </div>
               ))
             ) : (
-              <p>目录中还没有可用素材，请先放入文件或使用上传。</p>
+              <p className="library-empty">还没有导入记录。点击上方“从文件导入”，添加你的第一份素材。</p>
             )}
           </div>
           <footer>
             <Button
-              icon="arrow"
               disabled={!!e.busy}
-              onClick={() => {
-                fileInput.current?.click();
-              }}
+              onClick={() => setShowLibrary(false)}
             >
-              从电脑上传
+              取消
             </Button>
             <Button
               tone="primary"
               disabled={!checked.length || !!e.busy}
               onClick={() => {
-                void e.importFiles(checked, () => setShowLibrary(false));
+                void e.importFiles(library.filter(file => checked.includes(libraryId(file))), () => setShowLibrary(false));
               }}
             >
               {e.busy || `导入所选 ${checked.length || ""}`}
             </Button>
           </footer>
         </Modal>
+      )}
+      {audition && (
+        <AudioPreview key={audition.src} name={audition.name} src={audition.src} audio={audioPlayer}
+          onPlayingChange={(playing) => {
+            if (auditionSource.current !== audition.src) return;
+            setAuditionPlaying(playing);
+            if (playing) onAudioPlay();
+          }}
+          onError={() => {
+            if (auditionSource.current !== audition.src) return;
+            setAuditionPlaying(false);
+            e.report(new ApiError(`无法试听「${audition.name}」，请检查音频文件后重试。`));
+          }} />
       )}
     </section>
   );

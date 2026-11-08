@@ -8,6 +8,30 @@ import pytest
 
 from shiguang.api import create_app
 from shiguang.media import DATABASE
+from shiguang import workspace_api
+
+
+@pytest.mark.parametrize("suffix", ["mp3", "wav"])
+def test_library_audio_supports_range_reads_without_import(tmp_path, monkeypatch, suffix):
+    """试听提供本地音频的范围读取，且不能读取目录外或私有文件。"""
+    library = tmp_path / "library"
+    library.mkdir()
+    monkeypatch.setattr(workspace_api, "DATABASE", library)
+    source = library / f"试听 #1.{suffix}"
+    source.write_bytes(bytes(range(256)))
+    client = TestClient(create_app(tmp_path / "listen.db", log_dir=tmp_path / "logs"))
+    pid = client.post("/api/v1/projects", json={"name": "Listen without import"}).json()["project_id"]
+    before = client.get(f"/api/v1/projects/{pid}").json()
+    response = client.get("/api/v1/library/audio", params={"path": source.name}, headers={"Range": "bytes=100-129"})
+    assert response.status_code == 206 and response.content == bytes(range(100, 130))
+    assert response.headers["content-range"] == "bytes 100-129/256"
+    assert response.headers["content-type"].startswith("audio/")
+    assert client.get(f"/api/v1/projects/{pid}").json() == before
+    assert client.get(f"/api/v1/projects/{pid}/assets").json() == []
+    for path in ["../outside.wav", str(tmp_path / "outside.wav"), "managed/master.wav", ".hidden/private.mp3", ".env"]:
+        assert client.get("/api/v1/library/audio", params={"path": path}).status_code == 400
+    assert client.get("/api/v1/library/audio", params={"path": "video.mp4"}).status_code == 400
+    assert client.get("/api/v1/library/audio", params={"path": "missing.wav"}).status_code == 404
 
 
 def test_workspace_lists_and_empty_preview(tmp_path, monkeypatch):
@@ -19,7 +43,7 @@ def test_workspace_lists_and_empty_preview(tmp_path, monkeypatch):
     status = client.get("/api/v1/model-status").json()
     assert status["configured"] is False and "api_key" not in status
     library = client.get("/api/v1/library").json()
-    assert all(not x["path"].startswith("managed/") and not Path(x["path"]).is_absolute() for x in library)
+    assert library == []  # 尚未导入任何素材，即使 database 中已有其他文件也不显示。
     base = f"/api/v1/projects/{pid}"
     assert client.post(base + "/preview", json={"expected_revision": 1}).status_code == 409
     assert client.post(base + "/preview", json={"expected_revision": 0}).json()["error_code"] == "EMPTY_TIMELINE"

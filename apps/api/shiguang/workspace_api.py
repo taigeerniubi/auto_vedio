@@ -13,10 +13,20 @@ from .media import ARTIFACTS, DATABASE, contained, ffmpeg, import_media
 from .preview import prepare_preview
 from .models import Model, Snapshot
 from .tools import ToolError, uid
+from .savepoints import SavepointService, latest_savepoint
 
 
 class PreviewRequest(Model):
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
+
+
+class SavepointRequest(PreviewRequest):
+    request_id: str = Field(min_length=1, max_length=128)
+
+
+class ReuseAssetRequest(Model):
+    source_project_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    source_asset_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 def workspace_router(store):
@@ -29,6 +39,7 @@ def workspace_router(store):
         可安装到 FastAPI 的路由集合。
     """
     router = APIRouter(prefix="/api/v1")
+    savepoints = SavepointService(store)
 
     @router.get("/projects")
     def projects():
@@ -38,7 +49,29 @@ def workspace_router(store):
             最近创建的工程优先排列的列表。
         """
         with store.connect() as c:
-            return [dict(r) for r in c.execute("SELECT id AS project_id,name,head AS revision FROM projects ORDER BY rowid DESC LIMIT 200")]
+            rows = c.execute("SELECT id AS project_id,name,head AS revision FROM projects ORDER BY rowid DESC LIMIT 200").fetchall()
+            return [{**dict(r), "last_savepoint": latest_savepoint(c, r["project_id"])} for r in rows]
+
+    @router.get("/projects/{pid}/savepoints")
+    def list_savepoints(pid: str):
+        return savepoints.list(pid)
+
+    @router.post("/projects/{pid}/savepoints")
+    def create_savepoint(pid: str, req: SavepointRequest):
+        return savepoints.create(pid, req.expected_revision, req.request_id)
+
+    @router.post("/projects/{pid}/savepoints/{savepoint_id}/restore")
+    def restore_savepoint(pid: str, savepoint_id: str, req: PreviewRequest):
+        return savepoints.restore(pid, savepoint_id, req.expected_revision)
+
+    @router.delete("/projects/{pid}/savepoints/{savepoint_id}")
+    def remove_savepoint(pid: str, savepoint_id: str):
+        return savepoints.remove(pid, savepoint_id)
+
+    @router.delete("/projects/{pid}")
+    def delete_project(pid: str, expected_revision: int = Query(ge=0)):
+        """删除用户确认版本的项目，进行中的任务由存储层统一保护。"""
+        return store.delete_project(pid, expected_revision)
 
     @router.get("/model-status")
     def model_status():
@@ -56,24 +89,28 @@ def workspace_router(store):
 
     @router.get("/library")
     def library():
-        """扫描素材目录中的可导入文件，跳过托管副本和隐藏目录。
+        """只列出曾经导入成功的历史素材，不扫描本机目录。"""
+        from .asset_library import library_history
+        return library_history(store, DATABASE)
 
-        Returns:
-            最多五百个文件的相对路径、名称与大小。
-        """
-        found = []
-        for root, directories, filenames in os.walk(DATABASE, followlinks=False):
-            directories[:] = sorted(d for d in directories if d != "managed" and not d.startswith("."))
-            for name in sorted(filenames):
-                file = Path(root) / name
-                if file.suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm", ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".m4a", ".aac"}:
-                    continue
-                if not file.resolve().is_relative_to(DATABASE.resolve()) or not file.is_file():
-                    continue
-                found.append({"path": file.relative_to(DATABASE).as_posix(), "name": name, "size": file.stat().st_size})
-                if len(found) >= 500:
-                    return found
-        return found
+    @router.post("/projects/{pid}/assets/reuse")
+    def reuse(pid: str, req: ReuseAssetRequest):
+        """从已导入历史复用母版，不重新转码或调用素材分析。"""
+        from .asset_library import reuse_asset
+        return reuse_asset(store, pid, req.source_project_id, req.source_asset_id, DATABASE).model_dump()
+
+    @router.get("/library/audio")
+    def library_audio(path: str = Query(min_length=1, max_length=2000)):
+        """直接试听素材目录内的音频，支持范围读取，不导入或转码文件。"""
+        relative = Path(path)
+        if relative.is_absolute() or any(part.startswith(".") or part.lower() == "managed" for part in relative.parts):
+            raise ToolError("INVALID_MEDIA_FILE", "请选择素材目录中的音频文件")
+        source = contained(DATABASE / relative, DATABASE)
+        if source.suffix.lower() not in {".mp3", ".wav", ".m4a", ".aac"}:
+            raise ToolError("UNSUPPORTED_MEDIA", "仅支持试听音频文件")
+        if not source.is_file():
+            raise ToolError("MEDIA_NOT_FOUND", "音频文件已移动或删除")
+        return FileResponse(source)
 
     @router.post("/projects/{pid}/assets/upload")
     async def upload(pid: str, request: Request, filename: str = Query(min_length=1, max_length=200)):
@@ -221,8 +258,33 @@ def workspace_router(store):
         store.project(pid)
         root = contained(ARTIFACTS / "exports" / pid, ARTIFACTS / "exports")
         path = contained(root / filename, root)
-        if not path.is_file() or path.suffix != ".mp4":
+        if not path.is_file() or path.suffix != ".mp4" or path.name.endswith(".pending.mp4"):
             raise ToolError("EXPORT_NOT_FOUND", "导出文件不存在")
+        # 新后台任务只能在验收完成后下载，旧版成片仍可通过原链接访问。
+        with store.connect() as con:
+            has_jobs = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='export_jobs'").fetchone()
+            job = con.execute("SELECT status FROM export_jobs WHERE project_id=? AND id=?", (pid, path.stem)).fetchone() if has_jobs else None
+        if job and job["status"] != "completed":
+            raise ToolError("EXPORT_NOT_FOUND", "导出文件尚未验收完成")
         return FileResponse(path, media_type="video/mp4", filename=filename)
+
+    @router.post("/projects/{pid}/cover/export")
+    def export_cover(pid: str, req: PreviewRequest):
+        from .covers import render_cover
+        project = store.project(pid)
+        if project["revision"] != req.expected_revision:
+            raise ToolError("REVISION_CONFLICT", "工程已变化，请刷新后导出封面")
+        output = contained(ARTIFACTS / "covers" / pid / f"cover-r{req.expected_revision}-{uid('image')}.png", ARTIFACTS)
+        result = render_cover(Snapshot.model_validate(project["snapshot"]), store.assets(pid), output)
+        return {**result, "revision": req.expected_revision, "download_url": f"/api/v1/projects/{pid}/covers/{output.name}"}
+
+    @router.get("/projects/{pid}/covers/{filename}")
+    def cover_file(pid: str, filename: str):
+        store.project(pid)
+        root = contained(ARTIFACTS / "covers" / pid, ARTIFACTS / "covers")
+        path = contained(root / filename, root)
+        if not path.is_file() or path.suffix != ".png":
+            raise ToolError("COVER_NOT_FOUND", "封面图片不存在")
+        return FileResponse(path, media_type="image/png", filename=filename)
 
     return router

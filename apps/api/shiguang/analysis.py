@@ -13,7 +13,7 @@ from .media import ARTIFACTS, DATABASE, contained, ffmpeg
 from .models import Model, Unit
 from .perception_provider import configured_perception
 from .tools import ToolError, uid
-from .audio_query import query_audio
+from .audio_query import cached_query_audio
 
 
 class Subject(Model):
@@ -148,10 +148,13 @@ class AnalysisService:
         return analysis_records(self.store, pid).get(aid)
 
     def query_audio(self, pid, aid, question):
-        return query_audio(self.asset(pid, aid), question, self.provider_factory)
+        return cached_query_audio(self.store, self.asset(pid, aid), question, self.provider_factory)
 
     def save(self, pid, aid, record, *, publish=False):
         with self.store.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            if not con.execute("SELECT 1 FROM projects WHERE id=?", (pid,)).fetchone():
+                raise ToolError("PROJECT_NOT_FOUND", "项目不存在或已被删除")
             con.execute("INSERT INTO asset_analysis VALUES(?,?,?) ON CONFLICT(project_id,asset_id) DO UPDATE SET data=excluded.data",
                         (pid, aid, json.dumps(record, ensure_ascii=False)))
             if publish:
@@ -180,6 +183,8 @@ class AnalysisService:
         # 持久化占用标记，避免双击或并发运行重复产生模型费用。
         with self.store.connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            if not con.execute("SELECT 1 FROM projects WHERE id=?", (pid,)).fetchone():
+                raise ToolError("PROJECT_NOT_FOUND", "项目不存在或已被删除")
             row = con.execute("SELECT data FROM asset_analysis WHERE project_id=? AND asset_id=?", (pid, aid)).fetchone()
             record = json.loads(row[0]) if row else self.blank(asset)
             if record.get("status") == "running" or any(s["status"] == "running" for s in record["stages"].values()):
@@ -291,6 +296,9 @@ class AnalysisService:
         result = {"analysis_id": token, "asset_id": aid, "start_frame": start, "end_frame": end,
                   "frame_samples": frames, "visual": visual}
         with self.store.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            if not con.execute("SELECT 1 FROM projects WHERE id=?", (pid,)).fetchone():
+                raise ToolError("PROJECT_NOT_FOUND", "项目不存在或已被删除")
             con.execute("INSERT INTO analysis_versions VALUES(?,?,?,?)", (token, pid, aid, json.dumps(result, ensure_ascii=False)))
         return result
 

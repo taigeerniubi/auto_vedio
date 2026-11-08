@@ -1,0 +1,189 @@
+[
+  {
+    "id": "natural",
+    "label": "清透日常",
+    "family": "日常",
+    "grade": { "contrast": 1.06, "saturation": 1.04, "shadows": 0.08 }
+  },
+  {
+    "id": "cream",
+    "label": "奶油柔和",
+    "family": "日常",
+    "grade": {
+      "contrast": 0.92,
+      "temperature": 0.08,
+      "saturation": 0.92,
+      "blacks": 0.08
+    }
+  },
+  {
+    "id": "warm",
+    "label": "暖阳午后",
+    "family": "日常",
+    "legacy": "warm",
+    "grade": {}
+  },
+  {
+    "id": "portrait",
+    "label": "自然肤色",
+    "family": "人像",
+    "grade": {
+      "contrast": 1.02,
+      "vibrance": 0.08,
+      "hsl": { "orange": { "saturation": -0.05, "luminance": 0.08 } }
+    }
+  },
+  {
+    "id": "soft_skin",
+    "label": "暖肤柔光",
+    "family": "人像",
+    "grade": {
+      "temperature": 0.1,
+      "contrast": 0.92,
+      "highlights": -0.1,
+      "shadows": 0.1
+    }
+  },
+  {
+    "id": "cool_portrait",
+    "label": "清冷肖像",
+    "family": "人像",
+    "grade": {
+      "temperature": -0.12,
+      "saturation": 0.85,
+      "contrast": 1.08,
+      "hsl": { "orange": { "saturation": 0.12 } }
+    }
+  },
+  {
+    "id": "forest",
+    "label": "森林鲜绿",
+    "family": "风景",
+    "grade": {
+      "contrast": 1.12,
+      "vibrance": 0.18,
+      "hsl": { "green": { "hue": -8, "saturation": 0.12, "luminance": -0.08 } }
+    }
+  },
+  {
+    "id": "ocean",
+    "label": "海岸清蓝",
+    "family": "风景",
+    "grade": {
+      "temperature": -0.08,
+      "contrast": 1.08,
+      "hsl": {
+        "blue": { "hue": -12, "saturation": 0.18 },
+        "cyan": { "saturation": 0.1 }
+      }
+    }
+  },
+  {
+    "id": "autumn",
+    "label": "秋日暖棕",
+    "family": "风景",
+    "grade": {
+      "temperature": 0.16,
+      "saturation": 0.92,
+      "hsl": {
+        "green": { "hue": -35, "saturation": -0.25 },
+        "orange": { "saturation": 0.12 }
+      }
+    }
+  },
+  {
+    "id": "food",
+    "label": "暖食欲",
+    "family": "美食",
+    "grade": {
+      "exposure": 0.1,
+      "temperature": 0.1,
+      "vibrance": 0.16,
+      "contrast": 1.08
+    }
+  },
+  {
+    "id": "coffee",
+    "label": "咖啡棕",
+    "family": "美食",
+    "grade": {
+      "temperature": 0.16,
+      "saturation": 0.78,
+      "contrast": 1.14,
+      "blacks": 0.03
+    }
+  },
+  {
+    "id": "fresh",
+    "label": "明亮鲜彩",
+    "family": "美食",
+    "grade": {
+      "exposure": 0.2,
+      "vibrance": 0.22,
+      "shadows": 0.1,
+      "contrast": 1.04
+    }
+  },
+  {
+    "id": "teal_orange",
+    "label": "橙青电影",
+    "family": "电影",
+    "grade": {
+      "contrast": 1.16,
+      "saturation": 0.92,
+      "wheels": {
+        "shadows": { "hue": 185, "saturation": 0.2 },
+        "highlights": { "hue": 32, "saturation": 0.16 }
+      }
+    }
+  },
+  {
+    "id": "faded_film",
+    "label": "褪色胶片",
+    "family": "电影",
+    "grade": {
+      "contrast": 0.9,
+      "saturation": 0.8,
+      "blacks": 0.15,
+      "highlights": -0.12
+    }
+  },
+  {
+    "id": "vintage",
+    "label": "复古暖调",
+    "family": "电影",
+    "grade": {
+      "temperature": 0.18,
+      "saturation": 0.75,
+      "blacks": 0.09,
+      "wheels": { "shadows": { "hue": 155, "saturation": 0.1 } }
+    }
+  },
+  {
+    "id": "cool",
+    "label": "都市冷调",
+    "family": "夜景",
+    "legacy": "cool",
+    "grade": {}
+  },
+  {
+    "id": "neon",
+    "label": "蓝紫霓虹",
+    "family": "夜景",
+    "grade": {
+      "contrast": 1.15,
+      "vibrance": 0.2,
+      "wheels": {
+        "shadows": { "hue": 255, "saturation": 0.2 },
+        "highlights": { "hue": 310, "saturation": 0.12 }
+      }
+    }
+  },
+  {
+    "id": "monochrome",
+    "label": "经典黑白",
+    "family": "夜景",
+    "legacy": "monochrome",
+    "grade": {}
+  }
+]
