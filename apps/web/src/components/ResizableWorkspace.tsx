@@ -78,22 +78,22 @@ function getLayout(bounds: Bounds, preferences: Preferences) {
     const left = track(
       "library",
       "right",
-      compact ? 228 : clamp(width * 0.21, 246, 340),
-      208,
-      sideSpace - 248,
+      compact ? 270 : clamp(width * 0.245, 300, 380),
+      250,
+      sideSpace - 260,
     );
     const right = track(
       "dock",
       "left",
-      compact ? 266 : clamp(width * 0.23, 280, 390),
-      248,
+      compact ? 280 : clamp(width * 0.235, 310, 390),
+      260,
       sideSpace - left.size,
     );
     left.max = Math.floor(sideSpace - right.size);
     const timeline = track(
       "timeline",
       "top",
-      clamp(vh * 0.31, 310, 336),
+      clamp(vh * 0.3, 264, 320),
       156,
       height - gap - 225,
     );

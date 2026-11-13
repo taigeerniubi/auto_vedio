@@ -73,8 +73,13 @@ test("全部转场通过同一工具应用，预览与时间线同步且可以�
   const ruler = page.getByLabel('时间标尺');
   const pixelsPerFrame = ((await page.locator('.clip-block').first().boundingBox())!.width + 2) / 60;
   const previewCanvas = page.locator('.preview-stage canvas[data-transition="glitch"]');
+  // 实际点击坐标可能落在同样负责定位的播放头手柄上，按真实鼠标命中验证。
+  const clickFrame = async (target: number) => {
+    const bounds = (await ruler.boundingBox())!;
+    await page.mouse.click(bounds.x + target * pixelsPerFrame, bounds.y + 12);
+  };
   for (const target of [49, 57, 51]) {
-    await ruler.click({position: {x: target * pixelsPerFrame, y: 12}});
+    await clickFrame(target);
     await expect(previewCanvas).toHaveAttribute('data-frame', String(target));
   }
   const updates = previewCanvas.evaluate(node => new Promise<number[]>(resolve => {
@@ -91,7 +96,7 @@ test("全部转场通过同一工具应用，预览与时间线同步且可以�
   expect((await updates).filter(f => f > 51).length).toBeGreaterThanOrEqual(2);
   const pause = page.getByRole('button', {name: '暂停', exact: true});
   if (await pause.isVisible()) await pause.click();
-  await ruler.click({position: {x: 54 * pixelsPerFrame, y: 12}});
+  await clickFrame(54);
   await expect(previewCanvas).toHaveAttribute('data-frame', '54');
   await page.screenshot({ path: "artifacts/transition-acceptance/editor-transitions.png", fullPage: true });
   await panel.getByRole("button", { name: "移除转场", exact: true }).click();

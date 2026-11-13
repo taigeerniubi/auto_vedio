@@ -6,7 +6,7 @@ import { AssetsPanel, type Section } from "./components/AssetsPanel";
 import { AgentPanel } from "./components/AgentPanel";
 import { Timeline } from "./components/Timeline";
 import { ResizableWorkspace } from "./components/ResizableWorkspace";
-import { Button, Icon, Modal } from "./components/Ui";
+import { Button, Icon } from "./components/Ui";
 import { anchorRange, layout } from "./timeline";
 import { progressLabel } from "./runProgress";
 import { TemplatesPanel, type MotionDraft } from "./components/TemplatesPanel";
@@ -14,6 +14,9 @@ import {ColorPanel,type ColorDraft} from './components/ColorPanel';
 import { ExportDialog } from './components/ExportDialog';
 import { ProjectDialog } from './components/ProjectDialog';
 import { SavepointsDialog } from './components/SavepointsDialog';
+import { ThemeSwitcher } from './components/ThemeSwitcher';
+import { StartScreen } from './components/StartScreen';
+import { SettingsDialog } from './components/SettingsDialog';
 const CoverPanel=lazy(()=>import('./components/CoverPanel').then(module=>({default:module.CoverPanel})));
 const PreviewPanel = lazy(() =>
   import("./components/PreviewPanel").then((module) => ({
@@ -111,7 +114,7 @@ export function App() {
   }, [e.project, e.busy, e.selected, dialog, previewing]);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-has-project={!!e.project}>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">
@@ -144,6 +147,9 @@ export function App() {
           </span>
         </div>
         <div className="header-actions">
+          <ThemeSwitcher />
+          {!e.project && <Button className="app-settings" tone="ghost" icon="settings" aria-label="模型设置" title="模型设置" onClick={() => setDialog("settings")} />}
+          <span className="header-divider" />
           <Button
             tone="ghost"
             icon="undo"
@@ -168,6 +174,7 @@ export function App() {
             disabled={!e.project || !!e.busy} onClick={() => { player.current?.pause(); e.setError(null); setDialog("savepoints"); }} />
           <Button
             tone="primary"
+            icon="download"
             disabled={!e.exportState.active && (!!e.busy || !total)}
             onClick={() => { player.current?.pause(); setExportOpen(true); }}
           >
@@ -213,7 +220,7 @@ export function App() {
           <Button tone="primary" onClick={() => setExportOpen(true)}>查看成片 <Icon name="download" /></Button>
         </div>
       )}
-      <ResizableWorkspace>
+      {e.project ? <ResizableWorkspace>
         <aside id="workspace-library" className="library-panel panel" aria-label="剪辑工具与素材">
           <nav className="library-tools" aria-label="编辑工具">
             {(
@@ -237,6 +244,7 @@ export function App() {
               </button>
             ))}
           </nav>
+          <div className="library-content">
           {section === "templates" ? (
             <TemplatesPanel
               editor={e}
@@ -254,6 +262,7 @@ export function App() {
               onAudioPlay={() => player.current?.pause()}
               onTransitionPreview={target => { player.current?.pause(); seek(target); }} />
           )}
+          </div>
         </aside>
         <Suspense
           fallback={
@@ -298,7 +307,7 @@ export function App() {
           onSettings={() => setDialog("settings")}
           onRecordStart={() => player.current?.pause()}
         />
-      </ResizableWorkspace>
+      </ResizableWorkspace> : <StartScreen editor={e} onProjects={() => setDialog("project")} />}
       <footer className="statusbar">
         <span>
           <span className="dot" />
@@ -315,24 +324,6 @@ export function App() {
       </footer>
       {coverOpen&&e.project&&<Suspense fallback={null}><CoverPanel editor={e} frame={frame} onClose={()=>setCoverOpen(false)}/></Suspense>}
       {exportOpen && e.project && <ExportDialog key={e.project.project_id} project={e.project} controller={e.exportState} onClose={() => setExportOpen(false)} />}
-      {!e.project && !dialog && (
-        <div className="welcome-card">
-          <span className="eyebrow">A LITTLE STORY, YOUR WAY</span>
-          <h1>
-            拾起日常，
-            <br />
-            剪成自己的故事。
-          </h1>
-          <p>导入素材，整理镜头，让想法慢慢成为画面。</p>
-          <Button
-            tone="primary"
-            icon="plus"
-            onClick={() => setDialog("project")}
-          >
-            新建或打开项目
-          </Button>
-        </div>
-      )}
       {dialog === "project" && (
         <ProjectDialog editor={e} onClose={() => setDialog(null)} onDeletedCurrent={() => {
           player.current?.pause();
@@ -351,57 +342,7 @@ export function App() {
           setColorDraft(null);
           setMotionDraft(null);
         }} />}
-      {dialog === "settings" && (
-        <Modal title="模型连接" onClose={() => setDialog(null)}>
-          <div className="settings-content">
-            <p>支持 OpenAI 与 DeepSeek，当前使用后端配置的模型。</p>
-            <div className="settings-status">
-              <span className={`dot ${e.model?.configured ? "" : "amber"}`} />
-              {e.model?.configured
-                ? `已配置 ${e.model.provider} · ${e.model.model}`
-                : "尚未配置模型"}
-            </div>
-            <p>在启动后端的终端配置以下环境变量，然后重启后端并刷新页面：</p>
-            <pre>
-              SHIGUANG_MODEL_PROVIDER=openai 或 deepseek{"\n"}
-              SHIGUANG_MODEL_NAME=模型名称{"\n"}SHIGUANG_MODEL_API_KEY=你的 API
-              Key
-            </pre>
-            <small>
-              密钥只在后端保存，无需输入到网页。未连接模型时，手动剪辑、预览与导出仍可使用。
-            </small>
-            <h3>素材理解与语音输入</h3>
-            {(["vision", "speech", "audio"] as const).map((kind) => (
-              <p key={kind}>
-                {
-                  { vision: "视觉模型", speech: "语音模型", audio: "音频问答" }[
-                    kind
-                  ]
-                }
-                ：
-                {e.perception?.[kind]?.configured
-                  ? e.perception[kind].model
-                  : "未配置"}
-              </p>
-            ))}
-            <p>
-              在根目录 .env
-              独立填写配置并重启。画面和对白可在导入时分析，音频问答在提问时调用。
-            </p>
-            <pre>
-              SHIGUANG_VISION_BASE_URL=兼容接口地址{"\n"}
-              SHIGUANG_VISION_MODEL=视觉模型{"\n"}SHIGUANG_VISION_API_KEY=密钥
-              {"\n\n"}SHIGUANG_SPEECH_BASE_URL=兼容接口地址{"\n"}
-              SHIGUANG_SPEECH_MODEL=语音模型{"\n"}SHIGUANG_SPEECH_API_KEY=密钥
-              {"\n"}SHIGUANG_SPEECH_RESPONSE_FORMAT=verbose_json
-              {"\n\n"}SHIGUANG_AUDIO_API_KEY=百炼密钥
-            </pre>
-            <small>
-              自动字幕需要语音模型返回句级时间戳。仅返回文本的接口仍可用于录音输入。
-            </small>
-          </div>
-        </Modal>
-      )}
+      {dialog === "settings" && <SettingsDialog editor={e} onClose={() => setDialog(null)} />}
     </div>
   );
 }

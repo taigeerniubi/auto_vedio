@@ -273,6 +273,7 @@ export function AssetsPanel({
                   ? "可以调整筛选条件或搜索词。"
                   : "导入视频、图片或配乐后，可添加到时间线。"}
               </span>
+              {!e.assets.length && <Button icon="plus" disabled={disabled} onClick={() => setShowLibrary(true)}>导入第一份素材</Button>}
             </div>
           )}
         </>

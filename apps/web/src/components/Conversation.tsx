@@ -62,7 +62,9 @@ export function Conversation({ editor: e, onSuggest }: { editor: Editor; onSugge
       {e.conversation.loading && <p className="muted">正在加载历史对话…</p>}
       {!entries.length && !pending && !e.conversation.loading && (
         <div className="agent-welcome">
+          <span className="assistant-welcome-icon"><Icon name="spark" /></span>
           <h3>想怎么剪这段素材？</h3>
+          <p>描述你的想法，或从一个小调整开始。</p>
           <div className="starter-actions">
             {[
               ["layers", "给选中镜头加缓推", "给选中片段添加缓推效果"],

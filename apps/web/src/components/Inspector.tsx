@@ -220,11 +220,16 @@ export function Inspector({ editor: e }: { editor: Editor }) {
                     defaultValue={clip.transform.rotation_deg}
                   />
                 </label>
+              </div>
+              <details className="disclosure transform-advanced">
+                <summary>高级构图 <span>位置与独立拉伸</span></summary>
+                <div className="form-grid">
                 <label>水平位置<input name="position_x" aria-label="画面水平位置" type="number" min="-2" max="2" step="0.01" defaultValue={clip.transform.position_x||0}/></label>
                 <label>宽度拉伸 / 倍<input name="scale_x" aria-label="画面宽度拉伸" type="number" min="0.1" max="4" step="0.05" defaultValue={clip.transform.scale_x ?? 1}/></label>
                 <label>高度拉伸 / 倍<input name="scale_y" aria-label="画面高度拉伸" type="number" min="0.1" max="4" step="0.05" defaultValue={clip.transform.scale_y ?? 1}/></label>
                 <label>垂直位置<input name="position_y" aria-label="画面垂直位置" type="number" min="-2" max="2" step="0.01" defaultValue={clip.transform.position_y||0}/></label>
-              </div>
+                </div>
+              </details>
               <Button type="submit" disabled={disabled}>
                 应用构图
               </Button>
