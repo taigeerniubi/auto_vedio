@@ -1,10 +1,11 @@
 // 展示按工程持久化的历史对话、当前运行及编辑结果。
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "../hooks/useEditor";
-import type { Run, ConversationEntry } from "../contracts";
+import type { Run, ConversationEntry, FrameAnnotation } from "../contracts";
 import { Button, Icon } from "./Ui";
 import { progressLabel } from "../runProgress";
 import { ReplyContent } from "./ReplyContent";
+import { timecode } from "../timeline";
 
 const states = {
   running: "正在处理",
@@ -92,6 +93,7 @@ export function Conversation({ editor: e, onSuggest }: { editor: Editor; onSugge
         >
           <div className="user-message">
             <small>你</small>
+            {entry.annotation && <AnnotationBadge annotation={entry.annotation} />}
             <p>
               {entry.instruction ??
                 "旧版本未保存指令原文，以下是当时的运行结果。"}
@@ -108,6 +110,7 @@ export function Conversation({ editor: e, onSuggest }: { editor: Editor; onSugge
         <div className="conversation-turn">
           <div className="user-message">
             <small>你</small>
+            {e.instructionAnnotation && <AnnotationBadge annotation={e.instructionAnnotation} />}
             <p>{e.instruction}</p>
           </div>
           <RunMessage run={null} editor={e} active={active} />
@@ -115,6 +118,14 @@ export function Conversation({ editor: e, onSuggest }: { editor: Editor; onSugge
       )}
     </div>
   );
+}
+
+function AnnotationBadge({ annotation }: { annotation: FrameAnnotation }) {
+  const { region } = annotation;
+  return <span className="annotation-badge" title={`位置 ${Math.round(region.x * 100)}%, ${Math.round(region.y * 100)}% · 大小 ${Math.round(region.width * 100)}% × ${Math.round(region.height * 100)}%`}>
+    <span className="annotation-minimap" aria-hidden="true"><i style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }} /></span>
+    画面批注 · {timecode(annotation.frame)}
+  </span>;
 }
 
 /** 展示一次运行的进度、原因和编辑结果。

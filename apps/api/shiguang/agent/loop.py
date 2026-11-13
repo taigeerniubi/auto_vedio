@@ -68,12 +68,17 @@ class Agent:
             self.runs.event(rid, "开始执行")
             saved = self.runs.checkpoint(rid) or {}
             original = saved.get("instruction", command.instruction)
+            annotation = run.get("annotation")
             model_command = command.model_copy(update={
                 "instruction": original, "session_id": run["session_id"],
                 # 续跑依赖已保存的原任务和工具历史，不让当前浏览器选区改变恢复目标。
-                "selected_clip_ids": [] if saved.get("source_run_id") else command.selected_clip_ids,
+                "selected_clip_ids": ([] if saved.get("source_run_id") else
+                                      [clip["clip_id"] for clip in annotation["clips"]] if annotation else command.selected_clip_ids),
+                "playhead_frame": annotation["frame"] if annotation else command.playhead_frame,
             })
             ctx = context(self.store, self.store.draft(did), model_command)
+            if annotation:
+                ctx["画面批注"] = annotation
             if saved.get("source_run_id"):
                 ctx["中断任务"] = {"原始要求": original, "已执行工具": saved.get("trace", []),
                     "恢复方式": "从保存的草稿继续，不要重复已成功的编辑。旧版未保存的分析结果可以重新查询。"}

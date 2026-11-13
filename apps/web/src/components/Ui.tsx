@@ -19,6 +19,8 @@ const vectors: Record<string, React.ReactNode> = {
   close: <path d="m6 6 12 12M6 18 18 6"/>,
   cut: <><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="m8 8 13 13M8 16 21 3"/></>,
   arrow: <path d="M12 20V4m-6 6 6-6 6 6"/>,
+  annotation: <><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/><path d="M9 8h8v6h-4l-4 3V8Z"/></>,
+  mic: <><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3m-3 0h6"/></>,
   download: <><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></>,
   search: <><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></>,
   full: <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/>,

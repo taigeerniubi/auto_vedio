@@ -8,14 +8,19 @@ export function VoiceInput({
   editor: e,
   onText,
   onStart,
+  compact = false,
+  onBusyChange,
 }: {
   editor: Editor;
   onText: (text: string) => void;
   onStart: () => void;
+  compact?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [state, setState] = useState<
     "idle" | "asking" | "recording" | "transcribing"
   >("idle");
+  useEffect(() => { onBusyChange?.(state !== "idle"); }, [state, onBusyChange]);
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const cancelled = useRef(false);
@@ -146,10 +151,14 @@ export function VoiceInput({
     <div className="voice-input">
       {state === "idle" ? (
         <Button
+          icon={compact ? "mic" : undefined}
+          tone={compact ? "ghost" : "default"}
+          aria-label="录音输入"
+          title={e.perception?.speech.configured ? "录音后转为文字" : "请先在模型设置中配置语音识别"}
           disabled={!!e.busy || !e.project || !e.perception?.speech.configured}
           onClick={() => void start()}
         >
-          录音输入
+          {compact ? null : "录音输入"}
         </Button>
       ) : (
         <>

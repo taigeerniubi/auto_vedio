@@ -26,7 +26,8 @@ export function AgentPanel({
   const [text, setText] = useState("");
   const [tab, setTab] = useState<"agent" | "inspector">("agent");
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => setText(""), [e.project?.project_id, e.chatSessions.sessionId, e.chatSessions.draftKey]);
+  useEffect(() => setText(""), [e.project?.project_id, e.chatSessions.draftKey]);
+  useEffect(() => { if (e.instruction && e.busy === "AI 正在编辑") setTab("agent"); }, [e.instruction, e.busy]);
   const selected = e.project?.snapshot.clips.find(
     (c) => c.clip_id === e.selected,
   );

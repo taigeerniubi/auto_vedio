@@ -40,6 +40,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS operations(draft_id TEXT, op_id TEXT, hash TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(draft_id,op_id));
                 CREATE TABLE IF NOT EXISTS agent_runs(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, request_id TEXT NOT NULL, hash TEXT NOT NULL, draft_id TEXT NOT NULL UNIQUE, base INTEGER NOT NULL, status TEXT NOT NULL, result TEXT NOT NULL, events TEXT NOT NULL, UNIQUE(project_id,request_id));
                 CREATE TABLE IF NOT EXISTS agent_run_inputs(run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, instruction TEXT NOT NULL, created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS agent_run_annotations(run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS agent_sessions(id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, created_at TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS agent_run_sessions(run_id TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES agent_sessions(id));
                 CREATE INDEX IF NOT EXISTS agent_sessions_project ON agent_sessions(project_id);
@@ -115,7 +116,7 @@ class Store:
             # 先清理带外键的子记录，整个删除过程只提交一次。
             runs = "SELECT id FROM agent_runs WHERE project_id=?"
             con.execute(f"DELETE FROM agent_resumptions WHERE source_run_id IN ({runs}) OR new_run_id IN ({runs})", (pid, pid))
-            for table in ("agent_checkpoints", "agent_run_inputs", "agent_run_sessions"):
+            for table in ("agent_checkpoints", "agent_run_inputs", "agent_run_sessions", "agent_run_annotations"):
                 con.execute(f"DELETE FROM {table} WHERE run_id IN ({runs})", (pid,))
             con.execute("DELETE FROM operations WHERE draft_id IN (SELECT id FROM drafts WHERE project_id=?)", (pid,))
             for table in ("agent_runs", "agent_sessions", "asset_analysis", "analysis_versions", "audio_query_cache", "project_savepoints", "drafts", "revisions", "assets"):

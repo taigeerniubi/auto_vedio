@@ -8,6 +8,7 @@ from ..store import dumps
 from ..tools import ToolError, uid
 from ..observability import log_event, sanitize
 from ..http_status import error_status
+from .annotations import capture_annotation
 
 
 def default_session_id(pid):
@@ -103,15 +104,17 @@ class RunRepository:
             ToolError: 运行不存在或不属于该项目。
         """
         with self.store.connect() as c:
-            row = c.execute("""SELECT r.*, d.seq, d.base, m.session_id,
+            row = c.execute("""SELECT r.*, d.seq, d.base, m.session_id, a.data AS annotation,
                 CASE WHEN r.status='running' AND d.status='open' AND d.seq>0 THEN d.snapshot END AS live_snapshot
                 FROM agent_runs r JOIN drafts d ON d.id=r.draft_id AND d.project_id=r.project_id
                 LEFT JOIN agent_run_sessions m ON m.run_id=r.id
+                LEFT JOIN agent_run_annotations a ON a.run_id=r.id
                 WHERE r.id=? AND r.project_id=?""", (rid, pid)).fetchone()
         if not row:
             raise ToolError("RUN_NOT_FOUND", "运行不存在或不属于该项目")
         return {"run_id": row["id"], "project_id": pid, "request_id": row["request_id"],
                 "session_id": row["session_id"] or default_session_id(pid),
+                "annotation": json.loads(row["annotation"]) if row["annotation"] else None,
                 "draft_id": row["draft_id"], "status": row["status"],
                 "live_draft": {"seq": row["seq"], "base": row["base"], "snapshot": json.loads(row["live_snapshot"])}
                     if row["live_snapshot"] else None,
@@ -131,7 +134,7 @@ class RunRepository:
             ToolError: 请求编号复用但内容不同、版本冲突或选区无效。
         """
         # 未传会话时保留旧请求的指纹，升级后重试不会误报幂等冲突。
-        excluded = {key for key in ("session_id", "resume_run_id") if getattr(command, key, None) is None}
+        excluded = {key for key in ("session_id", "resume_run_id", "annotation") if getattr(command, key, None) is None}
         if not command.new_session:
             excluded.add("new_session")
         payload = command.model_dump(exclude=excluded)
@@ -164,6 +167,7 @@ class RunRepository:
                     raise ToolError("REVISION_CONFLICT", "项目已变更，请刷新后重新提交")
                 snapshot = c.execute("SELECT snapshot FROM revisions WHERE project_id=? AND revision=?", (pid, project["head"])).fetchone()[0]
                 resume = self._resume_source(c, pid, sid, command)
+                annotation = capture_annotation(json.loads(snapshot), project["head"], command.annotation)
                 checkpoint = None
                 if resume:
                     if resume["base"] != project["head"]:
@@ -176,6 +180,8 @@ class RunRepository:
                     snapshot = dumps(checkpoint["snapshot"]) if "snapshot" in checkpoint else resume["snapshot"]
                     checkpoint["source_run_id"] = resume["id"]
                     checkpoint["snapshot"] = json.loads(snapshot)
+                    original_annotation = c.execute("SELECT data FROM agent_run_annotations WHERE run_id=?", (resume["id"],)).fetchone()
+                    annotation = json.loads(original_annotation[0]) if original_annotation else None
                 ids = {x["clip_id"] for x in json.loads(snapshot)["clips"]}
                 # 续跑恢复的是断点草稿；浏览器选区可能仍指向已被分割或删除的正式片段。
                 # 该选区不参与续跑上下文，只有新任务才按当前工程严格校验。
@@ -187,6 +193,8 @@ class RunRepository:
                 # 指令仅保存在本机对话记录，不写诊断日志；与运行创建使用同一事务。
                 c.execute("INSERT INTO agent_run_inputs VALUES(?,?,?)", (rid, command.instruction, datetime.now(timezone.utc).isoformat()))
                 c.execute("INSERT INTO agent_run_sessions VALUES(?,?)", (rid, sid))
+                if annotation:
+                    c.execute("INSERT INTO agent_run_annotations VALUES(?,?)", (rid, dumps(annotation)))
                 if checkpoint:
                     c.execute("INSERT INTO agent_checkpoints VALUES(?,?)", (rid, dumps(checkpoint)))
                     c.execute("INSERT INTO agent_resumptions VALUES(?,?)", (resume["id"], rid))
@@ -194,6 +202,8 @@ class RunRepository:
 
     def _resume_source(self, con, pid, sid, command):
         """只恢复当前项目/会话的失败任务，并阻止重复恢复已被接续的草稿。"""
+        if command.annotation:
+            return None
         explicit = getattr(command, "resume_run_id", None)
         continuation = command.instruction.strip().strip("。！!，,？? ").lower() in {
             "继续", "重试", "继续上次任务", "重试上次任务", "继续执行", "继续剪辑", "retry", "continue", "resume",
@@ -266,9 +276,10 @@ class RunRepository:
                     WHERE r.project_id=? AND m.run_id IS NULL LIMIT 1""", (pid,)).fetchone():
                     self._ensure_default_session(c, pid)
                 self._require_session(c, pid, session_id)
-            rows = c.execute("""SELECT r.*, r.rowid AS cursor, i.instruction, i.created_at,m.session_id
+            rows = c.execute("""SELECT r.*, r.rowid AS cursor, i.instruction, i.created_at,m.session_id,a.data AS annotation
                 FROM agent_runs r LEFT JOIN agent_run_inputs i ON i.run_id=r.id
                 LEFT JOIN agent_run_sessions m ON m.run_id=r.id
+                LEFT JOIN agent_run_annotations a ON a.run_id=r.id
                 WHERE r.project_id=? AND (? IS NULL OR r.rowid<?)
                 AND (? IS NULL OR COALESCE(m.session_id,?)=?)
                 ORDER BY r.rowid DESC LIMIT ?""",
@@ -279,6 +290,8 @@ class RunRepository:
                   "draft_id": row["draft_id"], "status": row["status"],
                   "result": json.loads(row["result"]), "events": json.loads(row["events"]),
                   "instruction": row["instruction"], "created_at": row["created_at"]} for row in reversed(page)]
+        for item, row in zip(items, reversed(page)):
+            item["annotation"] = json.loads(row["annotation"]) if row["annotation"] else None
         return {"items": items, "next_cursor": page[-1]["cursor"] if len(rows) > limit else None}
 
     def by_request(self, pid, request_id):

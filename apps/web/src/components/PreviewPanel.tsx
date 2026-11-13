@@ -10,6 +10,7 @@ import type { MotionDraft } from "./TemplatesPanel";
 import type {ColorDraft} from './ColorPanel';
 import {CanvasTransform, type TransformDraft} from './CanvasTransform';
 import type {Editor} from '../hooks/useEditor';
+import { FrameAnnotator } from './FrameAnnotator';
 
 /** 准备并播放与后端导出相同的合成清单。
  * Args:
@@ -44,6 +45,7 @@ export function PreviewPanel({
 }) {
   const [transformDraft,setTransformDraft]=useState<TransformDraft>(null);
   const [adjusting,setAdjusting]=useState(true);
+  const [annotating, setAnnotating] = useState(false);
   const stage=useRef<HTMLDivElement>(null);
   const [stageSize,setStageSize]=useState({width:0,height:0});
   useEffect(()=>{const node=stage.current;if(!node)return;const observer=new ResizeObserver(([entry])=>setStageSize({width:entry.contentRect.width,height:entry.contentRect.height}));observer.observe(node);return()=>observer.disconnect();},[]);
@@ -62,6 +64,11 @@ export function PreviewPanel({
   const prepared = useRef<{ key: string; promise: Promise<Preview> } | null>(null);
   const previousProject = useRef<string | undefined>(undefined);
   const revision = project ? `${project.project_id}:${project.revision}` : "";
+  useEffect(() => setAnnotating(false), [revision, editor.chatSessions.draftKey, motionDraft, colorDraft]);
+  const closeAnnotation = () => {
+    setAnnotating(false);
+    document.getElementById("preview-annotate")?.focus({ preventScroll: true });
+  };
   useEffect(() => {
     if (!volumeOpen) return;
     const outside = (event: PointerEvent) => {
@@ -131,7 +138,7 @@ export function PreviewPanel({
     setMuted(current.isMuted());
     const update = ({ detail }: { detail: { frame: number } }) =>
       onFrame(detail.frame);
-    const play = () => { setPlaying(true); onPlay(); };
+    const play = () => { setPlaying(true); setAnnotating(false); onPlay(); };
     const pause = () => setPlaying(false);
     const volumeChange = ({ detail }: { detail: { volume: number } }) => setVolume(detail.volume);
     const muteChange = ({ detail }: { detail: { isMuted: boolean } }) => setMuted(detail.isMuted);
@@ -178,7 +185,11 @@ export function PreviewPanel({
       <div className="panel-heading">
         <h2>{motionDraft ? "运镜预览 · 尚未应用" : colorDraft ? "调色预览" : "成片预览"}</h2>
         <div className="row">
-          <Button tone="ghost" aria-pressed={adjusting} disabled={!preview} onClick={()=>setAdjusting(v=>!v)}>画面调整</Button>
+          <Button id="preview-annotate" data-annotation-ui tone="ghost" icon="annotation" aria-pressed={annotating}
+            disabled={!preview || loading || failed || playerError || !!editor.busy || !!motionDraft || !!colorDraft}
+            title="框选当前画面，告诉 AI 你想怎么改"
+            onClick={() => { player.current?.pause(); setAnnotating(value => !value); }}>批注</Button>
+          <Button tone="ghost" aria-pressed={adjusting && !annotating} disabled={!preview} onClick={()=>{setAnnotating(false);setAdjusting(v=>!v);}}>画面调整</Button>
           <span className="chip">{width > height ? "16:9" : "9:16"}</span>
           <span className="chip">
             {width} × {height}
@@ -202,8 +213,8 @@ export function PreviewPanel({
               maxHeight: "100%",
               aspectRatio: `${width}/${height}`,
             }}
-            clickToPlay={!adjusting}
-            doubleClickToFullscreen={!adjusting}
+            clickToPlay={!adjusting && !annotating}
+            doubleClickToFullscreen={!adjusting && !annotating}
             initialFrame={Math.min(frame, preview.plan.total_frames - 1)}
             initiallyMuted={muted}
             initialVolume={volume}
@@ -221,7 +232,8 @@ export function PreviewPanel({
               );
             }}
           />
-          {adjusting&&!playing&&!motionDraft&&(selectedClip?<CanvasTransform clip={selectedClip} frame={frame} width={width} height={height} editor={editor}
+          {annotating && <FrameAnnotator editor={editor} frame={frame} onClose={closeAnnotation} onPause={() => player.current?.pause()} />}
+          {!annotating&&adjusting&&!playing&&!motionDraft&&(selectedClip?<CanvasTransform clip={selectedClip} frame={frame} width={width} height={height} editor={editor}
             onDraft={setTransformDraft} onPause={()=>player.current?.pause()}/>:activeClips.length>0&&<button className="select-canvas-clip" aria-label="选择当前画面进行调整" disabled={!!editor.busy}
               onClick={()=>{player.current?.pause();editor.setSelected(activeClips.at(-1)!.clip_id);}}/>)}
           </div>

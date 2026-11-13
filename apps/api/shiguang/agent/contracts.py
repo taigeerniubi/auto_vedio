@@ -3,9 +3,28 @@ from dataclasses import dataclass
 import os
 from typing import Annotated, Protocol
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from ..models import Model
+
+
+class AnnotationRegion(Model):
+    """相对成片画布的区域；不包含播放器留白或浏览器像素坐标。"""
+    x: Annotated[float, Field(strict=True, ge=0, lt=1)]
+    y: Annotated[float, Field(strict=True, ge=0, lt=1)]
+    width: Annotated[float, Field(strict=True, gt=0, le=1)]
+    height: Annotated[float, Field(strict=True, gt=0, le=1)]
+
+    @model_validator(mode="after")
+    def contained(self):
+        if self.x + self.width > 1.000001 or self.y + self.height > 1.000001:
+            raise ValueError("批注区域必须在成片画布内")
+        return self
+
+
+class FrameAnnotation(Model):
+    frame: Annotated[int, Field(strict=True, ge=0)]
+    region: AnnotationRegion
 
 
 class Command(Model):
@@ -17,6 +36,13 @@ class Command(Model):
     expected_revision: Annotated[int, Field(strict=True, ge=0)]
     selected_clip_ids: list[str] = Field(default_factory=list, max_length=40)
     playhead_frame: Annotated[int, Field(strict=True, ge=0)] = 0
+    annotation: FrameAnnotation | None = None
+
+    @model_validator(mode="after")
+    def annotation_is_new_request(self):
+        if self.annotation and self.resume_run_id:
+            raise ValueError("恢复任务使用原批注，不能同时提交新批注")
+        return self
 
 
 class Finish(Model):

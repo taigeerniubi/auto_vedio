@@ -97,7 +97,16 @@ export type ModelStatus = {
   provider: string;
   model: string;
 };
+export type AnnotationRegion = { x: number; y: number; width: number; height: number };
+export type FrameAnnotation = { frame: number; region: AnnotationRegion };
+export type SavedAnnotation = FrameAnnotation & {
+  revision: number;
+  composition: { width: number; height: number; fps: number };
+  clips: { clip_id: string; asset_id: string; local_frame: number; source_frame: number | null }[];
+};
+
 export type Run = {
+  annotation?: SavedAnnotation | null;
   live_draft?: { base: number; seq: number; snapshot: Snapshot } | null;
   run_id: string;
   project_id: string;

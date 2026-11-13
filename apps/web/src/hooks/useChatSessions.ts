@@ -101,6 +101,7 @@ export function useChatSessions(
 
   function select(sessionId: string) {
     if (!projectId || owner !== key || !sessions.some((item) => item.session_id === sessionId)) return;
+    if (sessionId !== selected) setBlankVersion(value => value + 1);
     setSelected(sessionId);
   }
 

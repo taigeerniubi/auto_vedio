@@ -11,6 +11,7 @@ import type {
   PerceptionStatus,
   LibraryFile,
   Savepoint,
+  FrameAnnotation,
 } from "../contracts";
 import { formatSavepointTime } from "../projectTime";
 import { layout } from "../timeline";
@@ -34,6 +35,7 @@ export function useEditor() {
   const [selected, setSelected] = useState("");
   const [run, setRun] = useState<Run | null>(null);
   const [instruction, setInstruction] = useState("");
+  const [instructionAnnotation, setInstructionAnnotation] = useState<FrameAnnotation | null>(null);
   const [savepointNotice, setSavepointNotice] = useState("");
   useEffect(() => setSavepointNotice(""), [project?.project_id]);
   const exportState = useExport(project);
@@ -412,21 +414,23 @@ export function useEditor() {
   /** 提交自然语言指令并轮询真实执行进度。
    * Args:
    *   text: 完整编辑要求。
-   *   onAccepted: 操作取得执行权后触发，用于清空已发送的输入。
+   *   onAccepted: 服务端已建立运行后触发，提交失败时保留输入。
    */
-  async function command(text: string, onAccepted?: () => void, resumeRunId?: string) {
+  async function command(text: string, onAccepted?: () => void, resumeRunId?: string, annotation?: FrameAnnotation) {
     if (!project || !text.trim() || !model?.configured || !conversation.ready || chatSessions.loading) return false;
     return task("AI 正在编辑", async () => {
       const id = crypto.randomUUID();
       const prefix = projectPath(project.project_id);
       setInstruction(text);
+      setInstructionAnnotation(annotation || null);
       setRun(null);
-      onAccepted?.();
       let polling = false,
         active = true;
       let lastUpdate: Run | null = null;
       let sessionNoted = false;
+      let acceptedNoted = false;
       const noteSession = (accepted: Run) => {
+        if (!acceptedNoted) { acceptedNoted = true; onAccepted?.(); }
         if (sessionNoted) return;
         const sid = accepted.session_id || chatSessions.sessionId;
         if (!sid) return;
@@ -458,8 +462,9 @@ export function useEditor() {
           instruction: text,
           expected_revision: project.revision,
           // 明确续跑使用服务端保存的任务上下文，不把当前正式时间线选区带入旧草稿。
-          selected_clip_ids: !resumeRunId && project.snapshot.clips.some(clip => clip.clip_id === selected) ? [selected] : [],
-          playhead_frame: playhead.current,
+          selected_clip_ids: !resumeRunId && !annotation && project.snapshot.clips.some(clip => clip.clip_id === selected) ? [selected] : [],
+          playhead_frame: annotation?.frame ?? playhead.current,
+          ...(annotation ? { annotation } : {}),
         });
         // 取消接口可先返回终态，无需等待上游模型连接退出才能继续操作。
         const cancelled = new Promise<Run>(resolve => { finishCommand.current = resolve; });
@@ -588,6 +593,7 @@ export function useEditor() {
     selected,
     run,
     instruction,
+    instructionAnnotation,
     exportState,
     conversation,
     chatSessions,

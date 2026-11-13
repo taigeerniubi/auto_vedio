@@ -470,7 +470,7 @@ test("模型调用返回502时展示额度原因并保留失败运行", async ({
   await expect(page.locator(".save-status")).toContainText("所有更改已保存");
 });
 
-test("回车发送并清空输入，Shift换行和中文组词回车不发送", async ({ page }) => {
+test("回车发送在服务端接受后清空输入，Shift换行和中文组词回车不发送", async ({ page }) => {
   await page.route("**/api/v1/model-status", (route) =>
     route.fulfill({
       json: { configured: true, provider: "deepseek", model: "test-model" },
@@ -478,10 +478,14 @@ test("回车发送并清空输入，Shift换行和中文组词回车不发送", 
   );
   await createProject(page);
   const sent: string[] = [];
+  let accepted = false;
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  await page.route("**/commands/*", route => accepted
+    ? route.fulfill({ json: { run_id: "keyboard-run", status: "running", events: [], result: {} } })
+    : route.fulfill({ status: 404, json: { error_code: "RUN_NOT_FOUND" } }));
   await page.route("**/commands", async (route) => {
     sent.push(route.request().postDataJSON().instruction);
     await gate;
@@ -505,6 +509,8 @@ test("回车发送并清空输入，Shift换行和中文组词回车不发送", 
   await expect(input).toHaveValue("中文组词确认");
   await input.press("Enter");
   await expect.poll(() => sent.length).toBe(1);
+  await expect(input).toHaveValue("中文组词确认");
+  accepted = true;
   await expect(input).toHaveValue("");
   await expect(input).toBeDisabled();
   release();

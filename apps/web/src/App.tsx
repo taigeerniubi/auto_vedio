@@ -91,7 +91,7 @@ export function App() {
       }
       if (
         target.closest(
-          'input, textarea, select, audio, [data-audio-toggle], [contenteditable="true"], [role="separator"], [role="slider"], dialog',
+          'input, textarea, select, audio, [data-audio-toggle], [data-annotation-ui], [contenteditable="true"], [role="separator"], [role="slider"], dialog',
         ) ||
         dialog
       )
