@@ -62,7 +62,7 @@ class RequestLogMiddleware:
                 if response_started:
                     raise
                 response = JSONResponse(status_code=500, content={"ok": False, "error_code": "INTERNAL_ERROR",
-                    "summary": "Internal server error. See the ERROR traceback in logs/app.log using request_id.",
+                    "summary": "Internal server error. See the ERROR traceback in logs/backend.log using request_id.",
                     "exception_type": type(exc).__name__, "request_id": request_id})
                 await response(scope, receive, tracked_send)
             finally:

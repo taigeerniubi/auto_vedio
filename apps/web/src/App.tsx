@@ -194,7 +194,7 @@ export function App() {
             )}
             {e.error.requestId && (
               <small>
-                请求编号：{e.error.requestId} · 可在 logs/app.log 中定位
+                请求编号：{e.error.requestId} · 可在 logs/backend.log 中定位
               </small>
             )}
           </div>

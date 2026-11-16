@@ -68,7 +68,7 @@ def test_provider_failure_is_502_with_safe_reason(tmp_path, upstream, code, expe
     # 查询失败的运行记录本身仍然是成功读取，不应阻断前端轮询。
     queried = client.get(f"/api/v1/projects/{pid}/runs/{data['run_id']}")
     assert queried.status_code == 200 and queried.json()["status"] == "failed"
-    rows = [json.loads(line) for line in (tmp_path / "logs/app.log").read_text(encoding="utf-8").splitlines()]
+    rows = [json.loads(line) for line in (tmp_path / "logs/backend.log").read_text(encoding="utf-8").splitlines()]
     completed = next(r for r in rows if r.get("request_id") == data["request_id"] and r["event"] == "request_completed")
     assert completed["level"] == "ERROR" and completed["status_code"] == 502
     assert completed["path"].endswith("/commands")

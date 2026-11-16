@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "uv run --no-sync python start.py",
+    "stop": "uv run --no-sync python start.py stop",
+    "status": "uv run --no-sync python start.py status",
     "dev": "vite --config apps/web/vite.config.ts",
     "build": "vite build --config apps/web/vite.config.ts",
     "test:web": "playwright test",

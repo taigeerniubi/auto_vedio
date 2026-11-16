@@ -34,7 +34,7 @@ def test_conversation_survives_reload_and_pages_without_duplicates(tmp_path):
     assert reopened.get("/api/v1/projects/missing/runs").status_code == 404
     assert reopened.get(prefix + "/runs?limit=101").status_code == 422
     assert reopened.get(prefix + "/runs?before=0").status_code == 422
-    assert "private-history-instruction" not in (logs / "app.log").read_text(encoding="utf-8")
+    assert "private-history-instruction" not in (logs / "backend.log").read_text(encoding="utf-8")
 
 
 def test_legacy_run_has_result_without_invented_instruction(tmp_path):

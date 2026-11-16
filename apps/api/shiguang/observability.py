@@ -1,10 +1,9 @@
-"""统一生成脱敏的英文结构化日志并写入终端和可轮转文件。"""
+"""统一生成脱敏的英文结构化日志并追加到终端和固定文件。"""
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 import json
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import re
@@ -109,19 +108,19 @@ def log_context(**fields):
 
 
 def file_handler(directory):
-    """取得同一进程内共享的 UTF-8 轮转文件写入器。
+    """取得同一进程内共享的 UTF-8 追加文件写入器。
 
     Args:
         directory: 日志目录。
 
     Returns:
-        单文件 5 MiB、保留五份历史文件的写入器。
+        固定 backend.log 写入器，重启不覆盖、不新建带时间戳的日志。
     """
-    path = Path(directory).resolve() / "app.log"
+    path = Path(directory).resolve() / "backend.log"
     with _LOCK:
         if path not in _FILES:
             path.parent.mkdir(parents=True, exist_ok=True)
-            _FILES[path] = RotatingFileHandler(path, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+            _FILES[path] = logging.FileHandler(path, mode="a", encoding="utf-8")
         return _FILES[path]
 
 
@@ -147,5 +146,6 @@ def log_event(event, *, level=logging.INFO, error=None, secrets=(), logger="shig
         item.update(exception_details(error, secrets))
     message = json.dumps(sanitize(english_record(item), secrets), ensure_ascii=False, allow_nan=False)
     record = logging.LogRecord(logger, level, "", 0, message, (), None)
-    file_handler(directory).handle(record)
+    if os.getenv("SHIGUANG_LOG_RELAY") != "1":
+        file_handler(directory).handle(record)
     logging.getLogger(logger).log(level, message)

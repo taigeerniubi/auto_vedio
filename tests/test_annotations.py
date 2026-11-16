@@ -68,7 +68,7 @@ def test_annotation_and_sidebar_share_context_persist_and_deduplicate(context, t
     history = reopened.get(base + "/runs", params={"session_id": first["session_id"]}).json()["items"]
     assert history[1]["annotation"] == saved
     assert len(history) == 3
-    assert "这里放一句字幕" not in (tmp_path / "logs" / "app.log").read_text(encoding="utf-8")
+    assert "这里放一句字幕" not in (tmp_path / "logs" / "backend.log").read_text(encoding="utf-8")
     store.delete_project(pid, 1)
     with store.connect() as con:
         assert con.execute("SELECT COUNT(*) FROM agent_run_annotations").fetchone()[0] == 0

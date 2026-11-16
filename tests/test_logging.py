@@ -1,4 +1,4 @@
-"""验证接口日志落盘、异常定位、并发关联、脱敏和文件轮转。"""
+"""验证接口日志落盘、异常定位、并发关联、脱敏和跨启动追加。"""
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
@@ -22,7 +22,7 @@ def records(folder):
     Returns:
         解码后的日志对象列表。
     """
-    return [json.loads(line) for line in (folder / "app.log").read_text(encoding="utf-8").splitlines()]
+    return [json.loads(line) for line in (folder / "backend.log").read_text(encoding="utf-8").splitlines()]
 
 
 def test_only_numeric_usage_counters_are_exempt_from_token_redaction():
@@ -63,7 +63,7 @@ def test_http_failures_and_tool_failure_written_to_file(tmp_path):
     assert business["reason"] == "项目不存在" and business["exception_chain"][0]["stack"]
     invalid = next(item for item in logs if item["event"] == "request_validation_failed")
     assert invalid["validation_errors"] and all("input" not in item for item in invalid["validation_errors"])
-    text = (folder / "app.log").read_text(encoding="utf-8")
+    text = (folder / "backend.log").read_text(encoding="utf-8")
     for private in ("private-input-not-to-log", "private-query-not-to-log", "private-header-not-to-log"):
         assert private not in text
 
@@ -137,7 +137,7 @@ def test_agent_error_and_provider_details_share_request_and_run(tmp_path):
     assert model["provider_request_id"] == "provider-request-1"
     assert model["provider_error_code"] == "invalid_api_key"
     assert "密钥已失效" in model["provider_reason"]
-    text = (folder / "app.log").read_text(encoding="utf-8")
+    text = (folder / "backend.log").read_text(encoding="utf-8")
     assert all(private not in text for private in (secret, instruction, "private-debug-not-to-log"))
     assert "authentication_error" not in response.text
 
@@ -162,7 +162,7 @@ def test_provider_cause_redacted_again_in_agent_logger(tmp_path):
     pid = client.post("/api/v1/projects", json={"name": "异常链脱敏"}).json()["project_id"]
     result = client.post(f"/api/v1/projects/{pid}/commands", json={"request_id": "network-1", "instruction": "测试", "expected_revision": 0}).json()
     assert result["result"]["error_code"] == "MODEL_NETWORK_ERROR"
-    text = (folder / "app.log").read_text(encoding="utf-8")
+    text = (folder / "backend.log").read_text(encoding="utf-8")
     assert "连接拒绝" in text and secret not in text
 
 
@@ -191,7 +191,7 @@ def test_agent_internal_error_and_invalid_tool_parameters_are_diagnostic(tmp_pat
     assert "clips" in tool["reason"] and "list_type" in tool["reason"]
     internal = next(r for r in logs if r["event"] == "agent_internal_error")
     assert internal["reason"] == "模拟内部连接池失效" and internal["exception_chain"][0]["stack"]
-    assert "private-input-for-tool" not in (folder / "app.log").read_text(encoding="utf-8")
+    assert "private-input-for-tool" not in (folder / "backend.log").read_text(encoding="utf-8")
 
 
 def test_concurrent_requests_keep_separate_contexts(tmp_path):
@@ -207,19 +207,31 @@ def test_concurrent_requests_keep_separate_contexts(tmp_path):
         assert [r["event"] for r in matched] == ["request_rejected", "request_completed"]
 
 
-def test_rotation_utf8_and_context_reset(tmp_path):
+def test_append_utf8_and_context_reset(tmp_path):
     folder = tmp_path / "logs"
     handler = file_handler(folder)
-    handler.maxBytes, handler.backupCount = 600, 2
     with log_context(日志目录=folder):
         with log_context(请求编号="request-before-reset"):
             log_event("context_test", level=logging.WARNING)
         log_event("context_reset")
         assert "request_id" not in records(folder)[-1]
         for number in range(10):
-            log_event("rotation_test", 序号=number, 原因="这是中文错误原因" * 8)
-    assert (folder / "app.log.1").is_file() and (folder / "app.log.2").is_file()
-    assert not (folder / "app.log.3").exists()
-    assert records(folder)[-1]["index"] == 9
-    for path in folder.glob("app.log*"):
-        assert all(json.loads(line)["event"] == "rotation_test" for line in path.read_text(encoding="utf-8").splitlines())
+            log_event("append_test", 序号=number, 原因="这是中文错误原因" * 8)
+        # 关闭再打开文件处理器，模拟后端重启后继续追加。
+        handler.close()
+        log_event("after_restart")
+    assert len(records(folder)) == 13
+    assert records(folder)[-1]["event"] == "after_restart"
+    assert records(folder)[-2]["index"] == 9
+    assert records(folder)[0]["request_id"] == "request-before-reset"
+    assert sorted(path.name for path in folder.iterdir()) == ["backend.log"]
+
+
+def test_managed_backend_only_emits_once_to_console(tmp_path, monkeypatch, caplog):
+    """启动器接管时不由后端重复写盘，终端保留完整结构化事件。"""
+    monkeypatch.setenv("SHIGUANG_LOG_RELAY", "1")
+    with log_context(log_dir=tmp_path / "logs"):
+        log_event("managed_event")
+    assert not (tmp_path / "logs").exists()
+    rows = [json.loads(record.message) for record in caplog.records]
+    assert [row["event"] for row in rows] == ["managed_event"]
